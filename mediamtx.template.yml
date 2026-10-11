@@ -1,0 +1,60 @@
+logLevel: info
+logDestinations: [stdout]
+readTimeout: 15s
+writeTimeout: 15s
+
+authMethod: internal
+authInternalUsers:
+  - user: mobile
+    pass: "sha256:__PUBLISH_SHA256__"
+    permissions:
+      - action: publish
+        path: live
+  - user: studio
+    pass: "sha256:__READ_SHA256__"
+    permissions:
+      - action: read
+        path: live
+      - action: playback
+        path: live
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: api
+      - action: metrics
+
+api: true
+apiAddress: 127.0.0.1:9997
+metrics: true
+metricsAddress: 127.0.0.1:9998
+pprof: false
+
+rtsp: true
+rtspAddress: __TAILSCALE_IP__:8554
+rtspTransports: [tcp]
+
+rtmp: true
+rtmpAddress: __TAILSCALE_IP__:1935
+
+hls: true
+hlsAddress: __TAILSCALE_IP__:8888
+hlsAlwaysRemux: true
+hlsVariant: lowLatency
+
+webrtc: true
+webrtcAddress: __TAILSCALE_IP__:8889
+webrtcLocalUDPAddress: __TAILSCALE_IP__:8189
+webrtcAdditionalHosts: [__TAILSCALE_IP__]
+
+srt: true
+srtAddress: __TAILSCALE_IP__:8890
+
+moq: false
+
+pathDefaults:
+  source: publisher
+  overridePublisher: true
+  record: false
+
+paths:
+  live: {}

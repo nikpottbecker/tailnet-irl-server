@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.nik.irl-mediamtx</string>
+  <key>ProgramArguments</key><array><string>__INSTALL_DIR__/start-mediamtx.sh</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>IRL_CONFIG_DIR</key><string>__CONFIG_DIR__</string>
+    <key>IRL_STATE_DIR</key><string>__STATE_DIR__</string>
+    <key>MEDIAMTX_BIN</key><string>__INSTALL_DIR__/bin/mediamtx</string>
+    <key>TAILSCALE_BIN</key><string>/Applications/Tailscale.app/Contents/MacOS/Tailscale</string>
+    <key>TAILSCALE_IP</key><string>__TAILSCALE_IP__</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>__LOG_DIR__/mediamtx.log</string>
+  <key>StandardErrorPath</key><string>__LOG_DIR__/mediamtx-error.log</string>
+</dict></plist>

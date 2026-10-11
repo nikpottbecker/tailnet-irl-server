@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible problem with installation, streaming or the dashboard.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve Tailnet IRL Server. Never include credentials or complete stream URLs.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Server platform
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Debian or Ubuntu x86_64
+        - Debian or Ubuntu ARM64
+        - Proxmox LXC
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Release
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install …
+        2. Open …
+        3. Start …
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Self-test output
+      description: Remove private addresses, usernames, credentials and stream URLs before posting.
+      render: shell

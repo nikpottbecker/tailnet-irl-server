@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use Tailnet IRL Server, cite the project and retain the required attribution."
+title: "Tailnet IRL Server"
+type: software
+authors:
+  - family-names: "Pottbecker"
+    given-names: "Nik"
+    alias: "nikpottbecker"
+repository-code: "https://github.com/nikpottbecker/tailnet-irl-server"
+url: "https://github.com/nikpottbecker/tailnet-irl-server"
+version: "1.0.0"
+date-released: "2026-10-11"
+license: "BSD-Advertising-Acknowledgement"

@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest a focused improvement to the private IRL relay workflow.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Explain the production problem before describing the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed workflow
+      description: Describe how the feature should work for the streamer or operator.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Moblin / iPhone
+        - OBS / PC
+        - Media transport
+        - Dashboard
+        - macOS service
+        - Linux / Proxmox service
+        - Security
+        - Documentation
+    validations:
+      required: true
