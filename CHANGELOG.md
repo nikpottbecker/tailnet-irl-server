@@ -4,6 +4,8 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+## 1.6.0 — 2026-10-12
+
 ### Added
 
 - Show cached disk capacity, free space, aggregate recording size and recording count in the dashboard and `irl-serverctl status`.
