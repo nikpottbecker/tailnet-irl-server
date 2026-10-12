@@ -86,6 +86,7 @@ data = json.loads(os.environ["HEALTH_JSON"])
 ip, version, media_service, dashboard_service = sys.argv[1:]
 stream = "live" if data.get("ready") else "wartet auf Stream"
 history = data.get("history") if isinstance(data.get("history"), dict) else {}
+storage = data.get("storage") if isinstance(data.get("storage"), dict) else {}
 print(f"Version: {version}")
 print(f"Tailscale: {ip}")
 print(f"MediaMTX: {media_service}")
@@ -94,6 +95,13 @@ print(f"Stream: {stream}")
 print(f"Zuschauer: {data.get('readers', 0)}")
 print(f"Stream-Enden (24 h): {history.get('disconnects_24h', 0)}")
 print(f"Zuletzt live: {history.get('last_live_at') or '–'}")
+if storage.get("available"):
+    free_gib = float(storage.get("free_bytes", 0)) / (1024 ** 3)
+    recording_gib = float(storage.get("recording_bytes", 0)) / (1024 ** 3)
+    print(f"Speicher: {storage.get('level', 'unknown')} · {free_gib:.1f} GiB frei")
+    print(f"Aufnahmen: {storage.get('recording_files', 0)} Dateien · {recording_gib:.2f} GiB")
+else:
+    print("Speicher: nicht verfügbar")
 PY
 }
 

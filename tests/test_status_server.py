@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 import urllib.parse
+from collections import namedtuple
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -11,6 +12,48 @@ import status_server
 
 
 class StatusServerTests(unittest.TestCase):
+    def test_storage_monitor_aggregates_recordings_and_caches_results(self):
+        disk_usage = namedtuple("usage", "total used free")
+        clock = [100.0]
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            recordings = state_dir / "recordings" / "live"
+            recordings.mkdir(parents=True)
+            (recordings / "one.mp4").write_bytes(b"1234")
+            (recordings / "two.ts").write_bytes(b"123456")
+            (recordings / "ignored.txt").write_text("not media")
+            monitor = status_server.StorageMonitor(
+                state_dir, clock=lambda: clock[0], cache_seconds=30
+            )
+            with patch(
+                "status_server.shutil.disk_usage",
+                return_value=disk_usage(100 * 1024**3, 95 * 1024**3, 5 * 1024**3),
+            ):
+                snapshot = monitor.snapshot()
+                self.assertEqual(snapshot["level"], "warning")
+                self.assertEqual(snapshot["recording_files"], 2)
+                self.assertEqual(snapshot["recording_bytes"], 10)
+
+                (recordings / "three.mp4").write_bytes(b"12")
+                self.assertEqual(monitor.snapshot()["recording_files"], 2)
+                clock[0] += 31
+                refreshed = monitor.snapshot()
+                self.assertEqual(refreshed["recording_files"], 3)
+                self.assertEqual(refreshed["recording_bytes"], 12)
+
+    def test_storage_monitor_reports_critical_and_unavailable_states(self):
+        disk_usage = namedtuple("usage", "total used free")
+        with tempfile.TemporaryDirectory() as tmp:
+            monitor = status_server.StorageMonitor(Path(tmp))
+            with patch(
+                "status_server.shutil.disk_usage",
+                return_value=disk_usage(100 * 1024**3, 99 * 1024**3, 512 * 1024**2),
+            ):
+                self.assertEqual(monitor.snapshot()["level"], "critical")
+
+        unavailable = status_server.StorageMonitor(Path("/path/that/does/not/exist"))
+        self.assertFalse(unavailable.snapshot()["available"])
+
     def test_event_tracker_persists_stream_transitions_without_secrets(self):
         now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as tmp:

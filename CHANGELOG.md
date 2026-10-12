@@ -4,6 +4,15 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+### Added
+
+- Show cached disk capacity, free space, aggregate recording size and recording count in the dashboard and `irl-serverctl status`.
+- Add warning and critical storage levels suitable for long-running recordings.
+
+### Security
+
+- Expose only aggregate storage values through the status API, never recording file names or paths.
+
 ## 1.5.0 — 2026-10-12
 
 ### Added

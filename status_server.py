@@ -8,8 +8,10 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -239,6 +241,88 @@ class EventTracker:
         }
 
 
+class StorageMonitor:
+    """Return cached aggregate storage data without exposing file names or paths."""
+
+    def __init__(
+        self,
+        state_dir: Path,
+        clock: Callable[[], float] = time.monotonic,
+        cache_seconds: float = 30.0,
+    ) -> None:
+        self.state_dir = state_dir
+        self.clock = clock
+        self.cache_seconds = cache_seconds
+        self.lock = threading.Lock()
+        self.cached_at: float | None = None
+        self.cached: dict[str, object] | None = None
+
+    def snapshot(self) -> dict[str, object]:
+        now = self.clock()
+        with self.lock:
+            if (
+                self.cached is not None
+                and self.cached_at is not None
+                and now - self.cached_at < self.cache_seconds
+            ):
+                return dict(self.cached)
+            self.cached = self._collect()
+            self.cached_at = now
+            return dict(self.cached)
+
+    def _collect(self) -> dict[str, object]:
+        try:
+            usage = shutil.disk_usage(self.state_dir)
+        except OSError:
+            return {
+                "available": False,
+                "level": "unavailable",
+                "total_bytes": 0,
+                "free_bytes": 0,
+                "used_percent": 0.0,
+                "recording_files": 0,
+                "recording_bytes": 0,
+            }
+
+        recording_files = 0
+        recording_bytes = 0
+        recordings_dir = self.state_dir / "recordings"
+        if recordings_dir.is_dir():
+            try:
+                candidates = recordings_dir.rglob("*")
+                for path in candidates:
+                    if path.suffix.lower() not in {".mp4", ".ts"}:
+                        continue
+                    try:
+                        if path.is_file():
+                            recording_files += 1
+                            recording_bytes += path.stat().st_size
+                    except OSError:
+                        continue
+            except OSError:
+                pass
+
+        total = int(usage.total)
+        free = int(usage.free)
+        used_percent = ((total - free) / total * 100) if total > 0 else 0.0
+        free_ratio = (free / total) if total > 0 else 0.0
+        if free < 1024**3 or free_ratio < 0.03:
+            level = "critical"
+        elif free_ratio < 0.10 or (total >= 50 * 1024**3 and free < 5 * 1024**3):
+            level = "warning"
+        else:
+            level = "ok"
+        return {
+            "available": True,
+            "level": level,
+            "total_bytes": total,
+            "free_bytes": free,
+            "used_percent": round(used_percent, 1),
+            "recording_files": recording_files,
+            "recording_bytes": recording_bytes,
+        }
+
+
 def app_version(path: Path | None = None) -> str:
     version_path = path or Path(__file__).with_name("VERSION")
     try:
@@ -409,6 +493,9 @@ def tracked_stream_state(server: ThreadingHTTPServer) -> dict[str, object]:
     tracker = getattr(server, "event_tracker", None)
     if isinstance(tracker, EventTracker):
         state["history"] = tracker.observe(state)
+    storage_monitor = getattr(server, "storage_monitor", None)
+    if isinstance(storage_monitor, StorageMonitor):
+        state["storage"] = storage_monitor.snapshot()
     return state
 
 
@@ -492,7 +579,7 @@ def render_page(
 main{{max-width:900px;margin:auto;padding:28px 18px 60px}}header{{display:flex;gap:18px;justify-content:space-between;align-items:end;border-bottom:1px solid var(--line);padding-bottom:20px}}
 h1{{font-size:clamp(28px,7vw,54px);margin:0;letter-spacing:-.05em}}p{{color:var(--muted)}}.badge{{padding:9px 12px;border-radius:4px;font-weight:800;font-size:13px;letter-spacing:.08em;text-align:center}}.idle{{background:var(--accent);color:#161000}}.live{{background:var(--ok);color:#03130c}}.error{{background:var(--error);color:#210000}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:20px}}section{{background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:9px}}h2{{font-size:17px;margin:0 0 8px}}code{{display:block;color:#d8e8f2;overflow-wrap:anywhere;font-size:12px;background:#071019;padding:10px;border-radius:5px}}a.button,button{{display:inline-block;margin-top:12px;padding:11px 14px;background:var(--accent);color:#171000;text-decoration:none;border:0;border-radius:5px;font-weight:800;cursor:pointer}}small{{color:var(--muted)}}
-footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}}footer a{{color:var(--text)}}
+footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}}footer a{{color:var(--text)}}.storage-warning{{color:var(--accent)}}.storage-critical{{color:var(--error)}}
 </style></head><body><main>
 <header><div><small>TAILNET · {esc(ip)}</small><h1>IRL SERVER</h1></div><span id="status-badge" class="badge {status_class}" aria-live="polite">{status}</span></header>
 <div class="grid">
@@ -502,6 +589,7 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <section><h2>Vorschau</h2><p>LL-HLS oder WebRTC; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">LL-HLS öffnen</a> <a class="button" href="{esc(links['webrtc_preview'])}">WebRTC öffnen</a></section>
 <section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Recording: <b>{'aktiv' if recording_config['enabled'] else 'aus'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
 <section><h2>Verbindungsverlauf</h2><p>Stream-Enden in 24 h: <b id="disconnect-count">0</b><br>Zuletzt live: <b id="last-live">–</b></p><ol id="event-history"><li><small>Noch keine Ereignisse</small></li></ol></section>
+<section><h2>Speicher</h2><p>Status: <b id="storage-state">wird geladen</b><br>Frei: <b id="storage-free">–</b><br>Belegt: <b id="storage-used">–</b><br>Aufnahmen: <b id="recording-storage">–</b></p><small>Es werden nur Summen übertragen, keine Dateinamen oder Pfade.</small></section>
 <section><h2>Alternative für VLC</h2><p>RTSP ist für VLC/FFmpeg meist die einfachste Leseverbindung.</p><code id="rtsp">{esc(links['rtsp_read'])}</code><button data-copy-target="rtsp">RTSP-Link kopieren</button></section>
 </div>
 <footer>Tailnet IRL Server v{esc(app_version())} · This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
@@ -534,6 +622,32 @@ function formatEventDuration(value) {{
   const remainder = Math.floor(seconds % 60);
   const duration = hours > 0 ? `${{hours}}h ${{minutes}}m` : minutes > 0 ? `${{minutes}}m ${{remainder}}s` : `${{remainder}}s`;
   return ` · Laufzeit ${{duration}}`;
+}}
+function formatBytes(value) {{
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return '–';
+  if (bytes < 1024) return `${{bytes.toFixed(0)}} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let amount = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && amount >= 1024; index += 1) {{
+    amount /= 1024;
+    unit = units[index];
+  }}
+  return `${{amount.toFixed(amount >= 10 ? 1 : 2)}} ${{unit}}`;
+}}
+function showStorage(storage) {{
+  const value = storage && typeof storage === 'object' ? storage : {{available: false}};
+  const state = document.querySelector('#storage-state');
+  const labels = {{ok: 'OK', warning: 'KNAPP', critical: 'KRITISCH', unavailable: 'NICHT VERFÜGBAR'}};
+  const level = value.available ? (value.level || 'ok') : 'unavailable';
+  state.textContent = labels[level] || 'UNBEKANNT';
+  state.className = level === 'warning' ? 'storage-warning' : level === 'critical' ? 'storage-critical' : '';
+  document.querySelector('#storage-free').textContent = value.available ? formatBytes(value.free_bytes) : '–';
+  document.querySelector('#storage-used').textContent = value.available ? `${{Number(value.used_percent || 0).toFixed(1)}} %` : '–';
+  document.querySelector('#recording-storage').textContent = value.available
+    ? `${{Number(value.recording_files || 0).toLocaleString('de-DE')}} Dateien · ${{formatBytes(value.recording_bytes)}}`
+    : '–';
 }}
 function showHistory(history) {{
   const safeHistory = history && typeof history === 'object' ? history : {{}};
@@ -581,6 +695,7 @@ function showStatus(state) {{
   const tracks = Array.isArray(state.tracks) ? state.tracks : [];
   document.querySelector('#tracks').textContent = tracks.length ? tracks.join(', ') : '–';
   showHistory(state.history);
+  showStorage(state.storage);
   previousBytes = ready ? bytes : null;
   previousSampleAt = ready ? sampleAt : null;
 }}
@@ -712,6 +827,7 @@ def main() -> None:
     server.profile = read_profile()  # type: ignore[attr-defined]
     server.recording = read_recording()  # type: ignore[attr-defined]
     server.event_tracker = EventTracker(STATE_DIR / "connection-history.json")  # type: ignore[attr-defined]
+    server.storage_monitor = StorageMonitor(STATE_DIR)  # type: ignore[attr-defined]
     print(f"IRL dashboard listening on http://{ip}:{server.server_port}")
     try:
         server.serve_forever()

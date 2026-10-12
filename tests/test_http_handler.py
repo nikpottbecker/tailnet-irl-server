@@ -3,6 +3,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 from unittest.mock import patch
 
 import status_server
@@ -23,6 +24,7 @@ class HTTPHandlerTests(unittest.TestCase):
         self.server.profile = dict(status_server.DEFAULT_PROFILE)
         self.server.recording = dict(status_server.DEFAULT_RECORDING)
         self.server.event_tracker = status_server.EventTracker()
+        self.server.storage_monitor = status_server.StorageMonitor(Path.cwd())
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
@@ -40,8 +42,10 @@ class HTTPHandlerTests(unittest.TestCase):
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
             payload = json.load(response)
             history = payload.pop("history")
+            storage = payload.pop("storage")
             self.assertEqual(payload, self.state)
             self.assertEqual(history["disconnects_24h"], 0)
+            self.assertTrue(storage["available"])
 
     def test_health_endpoint_reports_media_server_failure(self):
         with self.assertRaises(urllib.error.HTTPError) as raised:
@@ -57,6 +61,7 @@ class HTTPHandlerTests(unittest.TestCase):
             self.assertEqual(response.headers["Server"].strip(), "TailnetIRLServer")
             self.assertIn("SERVER NICHT ERREICHBAR", body)
             self.assertIn("WebRTC öffnen", body)
+            self.assertIn("Speicher", body)
 
     def test_version_manifest_and_icon_endpoints(self):
         with urllib.request.urlopen(f"{self.base_url}/api/version") as response:
