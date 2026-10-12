@@ -22,6 +22,7 @@ class HTTPHandlerTests(unittest.TestCase):
         }
         self.server.profile = dict(status_server.DEFAULT_PROFILE)
         self.server.recording = dict(status_server.DEFAULT_RECORDING)
+        self.server.event_tracker = status_server.EventTracker()
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
@@ -37,7 +38,10 @@ class HTTPHandlerTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers["Cache-Control"], "no-store")
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
-            self.assertEqual(json.load(response), self.state)
+            payload = json.load(response)
+            history = payload.pop("history")
+            self.assertEqual(payload, self.state)
+            self.assertEqual(history["disconnects_24h"], 0)
 
     def test_health_endpoint_reports_media_server_failure(self):
         with self.assertRaises(urllib.error.HTTPError) as raised:

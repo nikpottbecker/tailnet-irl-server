@@ -4,6 +4,19 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+### Added
+
+- Persist a bounded 30-day stream and media-server connection history in the private state directory.
+- Show recent transitions, last-live time, completed stream durations and 24-hour stream-end counts in the dashboard.
+- Include the 24-hour stream-end count and last-live timestamp in `irl-serverctl status`.
+
+### Security
+
+- Store no credentials, connection URLs or media details in the connection history.
+- Normalize persisted event data before returning it through the status API.
+- Grant the hardened Linux dashboard service write access only to `/var/lib/irl-server`.
+- Restrict the macOS state directory to the installing user with mode `0700`.
+
 ## 1.4.0 — 2026-10-12
 
 ### Added

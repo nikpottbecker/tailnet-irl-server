@@ -8,6 +8,7 @@ Type=simple
 User=irl-server
 Group=irl-server
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=IRL_STATE_DIR=/var/lib/irl-server
 ExecStart=/usr/bin/python3 /opt/irl-server/status_server.py
 Restart=on-failure
 RestartSec=3
@@ -15,6 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ReadWritePaths=/var/lib/irl-server
 CapabilityBoundingSet=
 LockPersonality=true
 MemoryDenyWriteExecute=true

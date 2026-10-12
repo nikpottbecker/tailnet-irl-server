@@ -5,6 +5,7 @@
   <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>__INSTALL_DIR__/status_server.py</string></array>
   <key>EnvironmentVariables</key><dict>
     <key>IRL_CONFIG_DIR</key><string>__CONFIG_DIR__</string>
+    <key>IRL_STATE_DIR</key><string>__STATE_DIR__</string>
     <key>TAILSCALE_BIN</key><string>/Applications/Tailscale.app/Contents/MacOS/Tailscale</string>
     <key>TAILSCALE_IP</key><string>__TAILSCALE_IP__</string>
     <key>PYTHONDONTWRITEBYTECODE</key><string>1</string>

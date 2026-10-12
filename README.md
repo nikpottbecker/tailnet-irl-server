@@ -30,6 +30,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 - **Native services:** launchd on macOS and systemd on Debian or Ubuntu.
 - **Multiple outputs:** SRT, RTSP, RTMP, LL-HLS and WebRTC through MediaMTX.
 - **Installable dashboard:** PWA identity, direct LL-HLS/WebRTC previews and a machine-readable version endpoint.
+- **Connection history:** retain 30 days of stream/server transitions and recent live durations locally without storing credentials or media URLs.
 - **Automatic credentials:** publisher and viewer secrets are generated locally and kept out of logs.
 - **Reproducible install:** the MediaMTX download is checked against its official SHA-256 manifest.
 - **Self-test included:** verify Tailnet binding, services and the MediaMTX API at any time.
@@ -120,7 +121,7 @@ The dashboard contains working connection URLs and should only be reachable by t
 
 ## Operations
 
-The installed management command summarizes the complete service state without displaying credentials:
+The installed management command summarizes the complete service state and recent connection history without displaying credentials:
 
 ```bash
 # macOS
@@ -131,6 +132,8 @@ irl-serverctl status
 ```
 
 Use `irl-serverctl check-update` to compare the installed version with the latest GitHub release. It only checks and reports; it never installs an update automatically. `irl-serverctl restart` restarts both services, and `irl-serverctl recording status` delegates to the recording control safely.
+
+The dashboard keeps up to 200 connection events for 30 days in `connection-history.json` below the platform state directory. Only timestamps, event types and completed stream durations are stored; credentials, connection URLs and media content are never written to this history. The state survives service restarts and is retained during uninstall like the existing configuration and recordings.
 
 Linux:
 

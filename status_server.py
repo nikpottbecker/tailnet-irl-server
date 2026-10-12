@@ -9,14 +9,18 @@ import json
 import os
 import re
 import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 
 
 CONFIG_DIR = Path(os.environ.get("IRL_CONFIG_DIR", "/etc/irl-server"))
+STATE_DIR = Path(os.environ.get("IRL_STATE_DIR", "/var/lib/irl-server"))
 API_URL = os.environ.get("MEDIAMTX_API", "http://127.0.0.1:9997/v3/paths/list")
 TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 DEFAULT_PROFILE: dict[str, object] = {
@@ -41,6 +45,198 @@ ICON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 <circle cx="256" cy="363" r="34" fill="#39d98a"/>
 <text x="256" y="155" text-anchor="middle" fill="#f6f8fa" font-family="system-ui,sans-serif" font-size="88" font-weight="800">IRL</text>
 </svg>"""
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+
+
+def parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+class EventTracker:
+    """Persist a bounded history of availability transitions without secrets."""
+
+    EVENT_TYPES = {
+        "stream_started",
+        "stream_stopped",
+        "server_online",
+        "server_offline",
+    }
+
+    def __init__(
+        self,
+        path: Path | None = None,
+        clock: Callable[[], datetime] = utc_now,
+        maximum_events: int = 200,
+        retention_days: int = 30,
+    ) -> None:
+        self.path = path
+        self.clock = clock
+        self.maximum_events = maximum_events
+        self.retention_days = retention_days
+        self.lock = threading.Lock()
+        self.events: list[dict[str, object]] = []
+        self.last_state: dict[str, bool] | None = None
+        self._load()
+
+    def _load(self) -> None:
+        if self.path is None:
+            return
+        try:
+            payload = json.loads(self.path.read_text())
+        except (OSError, ValueError, TypeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        events = payload.get("events")
+        if isinstance(events, list):
+            normalized_events: list[dict[str, object]] = []
+            for event in events:
+                if (
+                    not isinstance(event, dict)
+                    or event.get("type") not in self.EVENT_TYPES
+                    or parse_timestamp(event.get("at")) is None
+                ):
+                    continue
+                normalized: dict[str, object] = {
+                    "type": event["type"],
+                    "at": event["at"],
+                }
+                duration = event.get("duration_seconds")
+                if (
+                    event["type"] == "stream_stopped"
+                    and isinstance(duration, int)
+                    and not isinstance(duration, bool)
+                    and duration >= 0
+                ):
+                    normalized["duration_seconds"] = duration
+                normalized_events.append(normalized)
+            self.events = normalized_events[-self.maximum_events :]
+        last = payload.get("last_state")
+        if (
+            isinstance(last, dict)
+            and isinstance(last.get("online"), bool)
+            and isinstance(last.get("ready"), bool)
+        ):
+            self.last_state = {"online": last["online"], "ready": last["ready"]}
+
+    def _prune(self, now: datetime) -> bool:
+        previous_count = len(self.events)
+        cutoff = now - timedelta(days=self.retention_days)
+        self.events = [
+            event
+            for event in self.events
+            if (timestamp := parse_timestamp(event.get("at"))) is not None
+            and timestamp >= cutoff
+        ][-self.maximum_events :]
+        return len(self.events) != previous_count
+
+    def _save(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {"events": self.events, "last_state": self.last_state},
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        temporary.chmod(0o600)
+        temporary.replace(self.path)
+
+    def observe(self, state: dict[str, object]) -> dict[str, object]:
+        current = {
+            "online": bool(state.get("online")),
+            "ready": bool(state.get("ready")),
+        }
+        now = self.clock().astimezone(timezone.utc)
+        with self.lock:
+            previous = self.last_state
+            state_changed = previous != current
+            new_events: list[str] = []
+            if previous is None:
+                if current["ready"]:
+                    new_events.append("stream_started")
+            else:
+                if previous["online"] != current["online"]:
+                    new_events.append(
+                        "server_online" if current["online"] else "server_offline"
+                    )
+                if previous["ready"] != current["ready"]:
+                    new_events.append(
+                        "stream_started" if current["ready"] else "stream_stopped"
+                    )
+            for event_type in new_events:
+                event_time = now
+                if event_type == "stream_started":
+                    event_time = parse_timestamp(state.get("ready_since")) or now
+                event: dict[str, object] = {
+                    "type": event_type,
+                    "at": iso_timestamp(event_time),
+                }
+                if event_type == "stream_stopped":
+                    started_at = next(
+                        (
+                            parse_timestamp(previous_event.get("at"))
+                            for previous_event in reversed(self.events)
+                            if previous_event.get("type") == "stream_started"
+                        ),
+                        None,
+                    )
+                    if started_at is not None:
+                        event["duration_seconds"] = max(
+                            0, int((event_time - started_at).total_seconds())
+                        )
+                self.events.append(event)
+            self.last_state = current
+            history_pruned = self._prune(now)
+            if state_changed or history_pruned:
+                try:
+                    self._save()
+                except OSError as error:
+                    print(f"dashboard: event history could not be saved: {error}")
+            return self._summary(now)
+
+    def _summary(self, now: datetime) -> dict[str, object]:
+        cutoff = now - timedelta(hours=24)
+        disconnects = sum(
+            1
+            for event in self.events
+            if event.get("type") == "stream_stopped"
+            and (timestamp := parse_timestamp(event.get("at"))) is not None
+            and timestamp >= cutoff
+        )
+        last_live = next(
+            (
+                event["at"]
+                for event in reversed(self.events)
+                if event.get("type") == "stream_started"
+            ),
+            None,
+        )
+        return {
+            "disconnects_24h": disconnects,
+            "last_live_at": last_live,
+            "events": list(reversed(self.events[-10:])),
+        }
 
 
 def app_version(path: Path | None = None) -> str:
@@ -208,6 +404,14 @@ def stream_state() -> dict[str, object]:
     return state
 
 
+def tracked_stream_state(server: ThreadingHTTPServer) -> dict[str, object]:
+    state = dict(stream_state())
+    tracker = getattr(server, "event_tracker", None)
+    if isinstance(tracker, EventTracker):
+        state["history"] = tracker.observe(state)
+    return state
+
+
 def connection_data(
     ip: str,
     credentials: dict[str, str],
@@ -297,6 +501,7 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <section><h2>Fallback für Moblin</h2><p>Falls SRT in einem Netz blockiert ist, RTMP testen.</p><code id="rtmp">{esc(links['rtmp_publish'])}</code><button data-copy-target="rtmp">RTMP-Link kopieren</button></section>
 <section><h2>Vorschau</h2><p>LL-HLS oder WebRTC; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">LL-HLS öffnen</a> <a class="button" href="{esc(links['webrtc_preview'])}">WebRTC öffnen</a></section>
 <section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Recording: <b>{'aktiv' if recording_config['enabled'] else 'aus'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
+<section><h2>Verbindungsverlauf</h2><p>Stream-Enden in 24 h: <b id="disconnect-count">0</b><br>Zuletzt live: <b id="last-live">–</b></p><ol id="event-history"><li><small>Noch keine Ereignisse</small></li></ol></section>
 <section><h2>Alternative für VLC</h2><p>RTSP ist für VLC/FFmpeg meist die einfachste Leseverbindung.</p><code id="rtsp">{esc(links['rtsp_read'])}</code><button data-copy-target="rtsp">RTSP-Link kopieren</button></section>
 </div>
 <footer>Tailnet IRL Server v{esc(app_version())} · This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
@@ -314,6 +519,45 @@ function formatDuration(value) {{
   return hours > 0
     ? `${{hours}}:${{String(minutes).padStart(2, '0')}}:${{String(remainder).padStart(2, '0')}}`
     : `${{minutes}}:${{String(remainder).padStart(2, '0')}}`;
+}}
+function formatTimestamp(value) {{
+  const timestamp = Date.parse(value || '');
+  return Number.isFinite(timestamp)
+    ? new Intl.DateTimeFormat('de-DE', {{dateStyle: 'short', timeStyle: 'medium'}}).format(timestamp)
+    : '–';
+}}
+function formatEventDuration(value) {{
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = Math.floor(seconds % 60);
+  const duration = hours > 0 ? `${{hours}}h ${{minutes}}m` : minutes > 0 ? `${{minutes}}m ${{remainder}}s` : `${{remainder}}s`;
+  return ` · Laufzeit ${{duration}}`;
+}}
+function showHistory(history) {{
+  const safeHistory = history && typeof history === 'object' ? history : {{}};
+  document.querySelector('#disconnect-count').textContent = Number(safeHistory.disconnects_24h || 0).toLocaleString('de-DE');
+  document.querySelector('#last-live').textContent = formatTimestamp(safeHistory.last_live_at);
+  const labels = {{stream_started: 'Stream gestartet', stream_stopped: 'Stream beendet/unterbrochen', server_online: 'Server wieder erreichbar', server_offline: 'Media-Server nicht erreichbar'}};
+  const events = Array.isArray(safeHistory.events) ? safeHistory.events : [];
+  const list = document.querySelector('#event-history');
+  list.replaceChildren();
+  if (!events.length) {{
+    const item = document.createElement('li');
+    const text = document.createElement('small');
+    text.textContent = 'Noch keine Ereignisse';
+    item.appendChild(text);
+    list.appendChild(item);
+    return;
+  }}
+  events.forEach((event) => {{
+    const item = document.createElement('li');
+    const text = document.createElement('small');
+    text.textContent = `${{labels[event.type] || 'Statusänderung'}} · ${{formatTimestamp(event.at)}}${{formatEventDuration(event.duration_seconds)}}`;
+    item.appendChild(text);
+    list.appendChild(item);
+  }});
 }}
 function showStatus(state) {{
   const online = Boolean(state.online);
@@ -336,6 +580,7 @@ function showStatus(state) {{
   document.querySelector('#sent-bytes').textContent = `${{(Number(state.bytes_sent || 0) / 1000000).toFixed(1)}} MB`;
   const tracks = Array.isArray(state.tracks) ? state.tracks : [];
   document.querySelector('#tracks').textContent = tracks.length ? tracks.join(', ') : '–';
+  showHistory(state.history);
   previousBytes = ready ? bytes : null;
   previousSampleAt = ready ? sampleAt : null;
 }}
@@ -388,7 +633,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urllib.parse.urlsplit(self.path).path
         if path in {"/healthz", "/api/status"}:
-            state = stream_state()
+            state = tracked_stream_state(self.server)
             body = json.dumps(state).encode()
             status = 200 if path == "/api/status" or state["online"] else 503
             self.send_response(status)
@@ -432,7 +677,7 @@ class Handler(BaseHTTPRequestHandler):
             body = render_page(
                 self.server.server_address[0],
                 self.server.credentials,  # type: ignore[attr-defined]
-                stream_state(),
+                tracked_stream_state(self.server),
                 self.server.profile,  # type: ignore[attr-defined]
                 self.server.recording,  # type: ignore[attr-defined]
             ).encode()
@@ -466,6 +711,7 @@ def main() -> None:
     server.credentials = read_credentials()  # type: ignore[attr-defined]
     server.profile = read_profile()  # type: ignore[attr-defined]
     server.recording = read_recording()  # type: ignore[attr-defined]
+    server.event_tracker = EventTracker(STATE_DIR / "connection-history.json")  # type: ignore[attr-defined]
     print(f"IRL dashboard listening on http://{ip}:{server.server_port}")
     try:
         server.serve_forever()

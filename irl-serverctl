@@ -85,12 +85,15 @@ import sys
 data = json.loads(os.environ["HEALTH_JSON"])
 ip, version, media_service, dashboard_service = sys.argv[1:]
 stream = "live" if data.get("ready") else "wartet auf Stream"
+history = data.get("history") if isinstance(data.get("history"), dict) else {}
 print(f"Version: {version}")
 print(f"Tailscale: {ip}")
 print(f"MediaMTX: {media_service}")
 print(f"Dashboard: {dashboard_service}")
 print(f"Stream: {stream}")
 print(f"Zuschauer: {data.get('readers', 0)}")
+print(f"Stream-Enden (24 h): {history.get('disconnects_24h', 0)}")
+print(f"Zuletzt live: {history.get('last_live_at') or '–'}")
 PY
 }
 

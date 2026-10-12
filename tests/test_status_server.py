@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 import urllib.parse
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -10,6 +11,49 @@ import status_server
 
 
 class StatusServerTests(unittest.TestCase):
+    def test_event_tracker_persists_stream_transitions_without_secrets(self):
+        now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "connection-history.json"
+            tracker = status_server.EventTracker(path, clock=lambda: now)
+            initial = tracker.observe(status_server.offline_state())
+            self.assertEqual(initial["events"], [])
+
+            live = status_server.offline_state()
+            live.update(
+                {
+                    "online": True,
+                    "ready": True,
+                    "ready_since": "2026-10-12T11:58:00Z",
+                    "secret": "must-not-be-stored",
+                }
+            )
+            history = tracker.observe(live)
+            self.assertEqual(history["last_live_at"], "2026-10-12T11:58:00Z")
+            self.assertEqual(
+                [event["type"] for event in history["events"]],
+                ["stream_started", "server_online"],
+            )
+
+            idle = dict(live, ready=False, ready_since=None)
+            history = tracker.observe(idle)
+            self.assertEqual(history["disconnects_24h"], 1)
+            self.assertEqual(history["events"][0]["type"], "stream_stopped")
+            self.assertEqual(history["events"][0]["duration_seconds"], 120)
+            self.assertNotIn("must-not-be-stored", path.read_text())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+            restored = status_server.EventTracker(path, clock=lambda: now)
+            restored_history = restored.observe(idle)
+            self.assertEqual(restored_history, history)
+
+            payload = json.loads(path.read_text())
+            payload["events"][0]["unexpected"] = "not exposed"
+            path.write_text(json.dumps(payload))
+            normalized = status_server.EventTracker(path, clock=lambda: now)
+            normalized_history = normalized.observe(idle)
+            self.assertNotIn("unexpected", normalized_history["events"][-1])
+
     def test_version_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "VERSION"

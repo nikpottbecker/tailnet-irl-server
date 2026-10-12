@@ -36,6 +36,7 @@ TEMP_DIR="$(mktemp -d /tmp/irl-server-macos.XXXXXX)"
 trap 'rm -rf -- "$TEMP_DIR"' EXIT
 
 mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$STATE_DIR" "$LOG_DIR" "$BIN_DIR" "$AGENT_DIR"
+chmod 0700 "$STATE_DIR"
 curl -fsSL "$BASE_URL/$ARCHIVE" -o "$TEMP_DIR/$ARCHIVE"
 curl -fsSL "$BASE_URL/checksums.sha256" -o "$TEMP_DIR/checksums.sha256"
 EXPECTED="$(awk -v file="$ARCHIVE" '{ name=$2; sub(/^\*/, "", name); if (name == file) print $1 }' "$TEMP_DIR/checksums.sha256")"
