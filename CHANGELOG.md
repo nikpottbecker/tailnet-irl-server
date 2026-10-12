@@ -4,6 +4,8 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+## 1.5.0 — 2026-10-12
+
 ### Added
 
 - Persist a bounded 30-day stream and media-server connection history in the private state directory.
