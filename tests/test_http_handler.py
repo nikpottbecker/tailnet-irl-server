@@ -57,7 +57,7 @@ class HTTPHandlerTests(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base_url}/api/version") as response:
             payload = json.load(response)
             self.assertEqual(payload["name"], "Tailnet IRL Server")
-            self.assertRegex(payload["version"], r"^1\.2\.0-dev$")
+            self.assertEqual(payload["version"], "1.2.0")
         with urllib.request.urlopen(f"{self.base_url}/manifest.webmanifest") as response:
             manifest = json.load(response)
             self.assertEqual(manifest["icons"][0]["src"], "/icon.svg")
