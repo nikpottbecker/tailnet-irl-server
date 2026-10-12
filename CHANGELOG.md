@@ -4,6 +4,8 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+## 1.4.0 — 2026-10-12
+
 ### Added
 
 - Add `irl-serverctl` for consolidated status, version, release, restart and recording controls.
