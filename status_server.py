@@ -7,6 +7,7 @@ import html
 import ipaddress
 import json
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -18,6 +19,15 @@ from pathlib import Path
 CONFIG_DIR = Path(os.environ.get("IRL_CONFIG_DIR", "/etc/irl-server"))
 API_URL = os.environ.get("MEDIAMTX_API", "http://127.0.0.1:9997/v3/paths/list")
 TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+DEFAULT_PROFILE: dict[str, object] = {
+    "stream_name": "IRL Server (Tailscale)",
+    "video_resolution": "1920x1080",
+    "video_fps": 30,
+    "video_bitrate": 6_000_000,
+    "audio_bitrate": 128_000,
+    "srt_latency": 2_000,
+    "adaptive_bitrate": True,
+}
 
 
 def is_tailscale_ipv4(value: str) -> bool:
@@ -28,18 +38,64 @@ def is_tailscale_ipv4(value: str) -> bool:
     return address.version == 4 and address in TAILSCALE_IPV4_NETWORK
 
 
-def read_credentials(path: Path | None = None) -> dict[str, str]:
+def read_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
-    for line in (path or CONFIG_DIR / "credentials.env").read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key] = value
+        values[key.strip()] = value.strip()
+    return values
+
+
+def read_credentials(path: Path | None = None) -> dict[str, str]:
+    values = read_env_file(path or CONFIG_DIR / "credentials.env")
     required = {"PUBLISH_PASSWORD", "READ_PASSWORD"}
     if not required.issubset(values):
         raise RuntimeError("credentials.env is incomplete")
     return values
+
+
+def read_profile(path: Path | None = None) -> dict[str, object]:
+    profile = dict(DEFAULT_PROFILE)
+    profile_path = path or CONFIG_DIR / "profile.env"
+    if not profile_path.exists():
+        return profile
+
+    values = read_env_file(profile_path)
+    stream_name = values.get("STREAM_NAME", str(profile["stream_name"]))
+    resolution = values.get("VIDEO_RESOLUTION", str(profile["video_resolution"]))
+    if not stream_name or len(stream_name) > 64:
+        raise RuntimeError("STREAM_NAME must contain 1 to 64 characters")
+    if not re.fullmatch(r"[1-9][0-9]{2,3}x[1-9][0-9]{2,3}", resolution):
+        raise RuntimeError("VIDEO_RESOLUTION must use WIDTHxHEIGHT, for example 1920x1080")
+
+    def integer(name: str, default: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(values.get(name, default))
+        except ValueError as error:
+            raise RuntimeError(f"{name} must be an integer") from error
+        if not minimum <= value <= maximum:
+            raise RuntimeError(f"{name} must be between {minimum} and {maximum}")
+        return value
+
+    adaptive = values.get("ADAPTIVE_BITRATE", "true").lower()
+    if adaptive not in {"true", "false"}:
+        raise RuntimeError("ADAPTIVE_BITRATE must be true or false")
+
+    profile.update(
+        {
+            "stream_name": stream_name,
+            "video_resolution": resolution,
+            "video_fps": integer("VIDEO_FPS", 30, 1, 120),
+            "video_bitrate": integer("VIDEO_BITRATE", 6_000_000, 100_000, 50_000_000),
+            "audio_bitrate": integer("AUDIO_BITRATE", 128_000, 32_000, 512_000),
+            "srt_latency": integer("SRT_LATENCY", 2_000, 120, 20_000),
+            "adaptive_bitrate": adaptive == "true",
+        }
+    )
+    return profile
 
 
 def offline_state() -> dict[str, object]:
@@ -101,9 +157,14 @@ def stream_state() -> dict[str, object]:
     return state
 
 
-def connection_data(ip: str, credentials: dict[str, str]) -> dict[str, str]:
+def connection_data(
+    ip: str,
+    credentials: dict[str, str],
+    profile: dict[str, object] | None = None,
+) -> dict[str, str]:
     publish = credentials["PUBLISH_PASSWORD"]
     read = credentials["READ_PASSWORD"]
+    stream_profile = profile or DEFAULT_PROFILE
     srt_publish = (
         f"srt://{ip}:8890?streamid=publish:live:mobile:{publish}&pkt_size=1316"
     )
@@ -111,19 +172,22 @@ def connection_data(ip: str, credentials: dict[str, str]) -> dict[str, str]:
     settings = {
         "streams": [
             {
-                "name": "IRL Server (Tailscale)",
+                "name": stream_profile["stream_name"],
                 "url": srt_publish,
                 "selected": True,
                 "video": {
-                    "resolution": "1920x1080",
-                    "fps": 30,
-                    "bitrate": 6000000,
+                    "resolution": stream_profile["video_resolution"],
+                    "fps": stream_profile["video_fps"],
+                    "bitrate": stream_profile["video_bitrate"],
                     "codec": "H.264/AVC",
                     "bFrames": False,
                     "maxKeyFrameInterval": 2,
                 },
-                "audio": {"bitrate": 128000},
-                "srt": {"latency": 2000, "adaptiveBitrateEnabled": True},
+                "audio": {"bitrate": stream_profile["audio_bitrate"]},
+                "srt": {
+                    "latency": stream_profile["srt_latency"],
+                    "adaptiveBitrateEnabled": stream_profile["adaptive_bitrate"],
+                },
             }
         ]
     }
@@ -146,8 +210,14 @@ def status_presentation(state: dict[str, object]) -> tuple[str, str]:
     return "WARTET AUF HANDY", "idle"
 
 
-def render_page(ip: str, credentials: dict[str, str], state: dict[str, object]) -> str:
-    links = connection_data(ip, credentials)
+def render_page(
+    ip: str,
+    credentials: dict[str, str],
+    state: dict[str, object],
+    profile: dict[str, object] | None = None,
+) -> str:
+    stream_profile = profile or DEFAULT_PROFILE
+    links = connection_data(ip, credentials, stream_profile)
     status, status_class = status_presentation(state)
 
     def esc(value: object) -> str:
@@ -168,7 +238,7 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 </style></head><body><main>
 <header><div><small>TAILNET · {esc(ip)}</small><h1>IRL SERVER</h1></div><span id="status-badge" class="badge {status_class}" aria-live="polite">{status}</span></header>
 <div class="grid">
-<section><h2>1 · iPhone / Moblin</h2><p>Tailscale verbinden, dann Moblin automatisch konfigurieren.</p><a class="button" href="{esc(links['moblin'])}">In Moblin öffnen</a><p><small>H.264 · 1080p30 · 6 Mbit/s · SRT 2000 ms · adaptive Bitrate</small></p></section>
+<section><h2>1 · iPhone / Moblin</h2><p>Tailscale verbinden, dann Moblin automatisch konfigurieren.</p><a class="button" href="{esc(links['moblin'])}">In Moblin öffnen</a><p><small>H.264 · {esc(stream_profile['video_resolution'])}p{esc(stream_profile['video_fps'])} · {float(stream_profile['video_bitrate']) / 1_000_000:g} Mbit/s · SRT {esc(stream_profile['srt_latency'])} ms · adaptive Bitrate {'an' if stream_profile['adaptive_bitrate'] else 'aus'}</small></p></section>
 <section><h2>2 · OBS auf dem PC</h2><p>Medienquelle → Lokale Datei aus → Eingabeformat <b>mpegts</b>.</p><code id="obs">{esc(links['srt_read'])}</code><button data-copy-target="obs">OBS-Link kopieren</button></section>
 <section><h2>Fallback für Moblin</h2><p>Falls SRT in einem Netz blockiert ist, RTMP testen.</p><code id="rtmp">{esc(links['rtmp_publish'])}</code><button data-copy-target="rtmp">RTMP-Link kopieren</button></section>
 <section><h2>Vorschau</h2><p>Browser-Vorschau über LL-HLS; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">Vorschau öffnen</a></section>
@@ -285,7 +355,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/manifest+json")
             self.send_header("Cache-Control", "public, max-age=86400")
         elif path == "/":
-            body = render_page(self.server.server_address[0], self.server.credentials, stream_state()).encode()  # type: ignore[attr-defined]
+            body = render_page(
+                self.server.server_address[0],
+                self.server.credentials,  # type: ignore[attr-defined]
+                stream_state(),
+                self.server.profile,  # type: ignore[attr-defined]
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -314,6 +389,7 @@ def main() -> None:
     ip = tailscale_ip()
     server = ThreadingHTTPServer((ip, int(os.environ.get("PORT", "8090"))), Handler)
     server.credentials = read_credentials()  # type: ignore[attr-defined]
+    server.profile = read_profile()  # type: ignore[attr-defined]
     print(f"IRL dashboard listening on http://{ip}:{server.server_port}")
     try:
         server.serve_forever()

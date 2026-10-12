@@ -34,6 +34,41 @@ class StatusServerTests(unittest.TestCase):
         self.assertEqual(stream["srt"]["latency"], 2000)
         self.assertTrue(stream["srt"]["adaptiveBitrateEnabled"])
 
+    def test_custom_stream_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profile.env"
+            path.write_text(
+                "STREAM_NAME=Mobile 720p\n"
+                "VIDEO_RESOLUTION=1280x720\n"
+                "VIDEO_FPS=50\n"
+                "VIDEO_BITRATE=3500000\n"
+                "AUDIO_BITRATE=96000\n"
+                "SRT_LATENCY=2500\n"
+                "ADAPTIVE_BITRATE=false\n"
+            )
+            profile = status_server.read_profile(path)
+        credentials = {
+            "PUBLISH_PASSWORD": "publishsecret1234567890",
+            "READ_PASSWORD": "readsecret123456789012",
+        }
+        links = status_server.connection_data("100.64.1.2", credentials, profile)
+        settings = json.loads(urllib.parse.unquote(links["moblin"].split("?", 1)[1]))
+        stream = settings["streams"][0]
+        self.assertEqual(stream["name"], "Mobile 720p")
+        self.assertEqual(stream["video"]["resolution"], "1280x720")
+        self.assertEqual(stream["video"]["fps"], 50)
+        self.assertEqual(stream["video"]["bitrate"], 3_500_000)
+        self.assertEqual(stream["audio"]["bitrate"], 96_000)
+        self.assertEqual(stream["srt"]["latency"], 2_500)
+        self.assertFalse(stream["srt"]["adaptiveBitrateEnabled"])
+
+    def test_invalid_stream_profile_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profile.env"
+            path.write_text("VIDEO_RESOLUTION=full-hd\nVIDEO_FPS=fast\n")
+            with self.assertRaisesRegex(RuntimeError, "VIDEO_RESOLUTION"):
+                status_server.read_profile(path)
+
     def test_dashboard_escapes_secrets(self):
         credentials = {
             "PUBLISH_PASSWORD": "secret&publisher123456789",

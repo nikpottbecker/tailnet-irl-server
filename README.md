@@ -151,6 +151,12 @@ sudo ./rotate-credentials.sh --yes
 
 After rotation, import Moblin again and copy fresh receiver URLs from the dashboard.
 
+### Customize the Moblin profile
+
+The installer creates an update-safe `profile.env` in the platform configuration directory. It controls the imported profile name, resolution, frame rate, video/audio bitrate, SRT latency and adaptive bitrate. Edit it, then restart only the dashboard service and import the Moblin profile again.
+
+See [`profile.env.example`](profile.env.example) for all supported values.
+
 ## Current scope
 
 Tailnet IRL Server provides one reliable SRT contribution path through Tailscale. It does not combine multiple network interfaces. Moblin SRTLA bonding requires a separate SRTLA receiver and is not included.
