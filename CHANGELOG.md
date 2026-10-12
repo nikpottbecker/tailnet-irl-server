@@ -4,6 +4,12 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+### Added
+
+- Add optional server-side fMP4/MPEG-TS recording with configurable segments and retention.
+- Add `recording.sh` to enable, disable, inspect and list recordings without deleting existing media.
+- Verify real fMP4 output in the authenticated SRT end-to-end test.
+
 ## 1.2.0 — 2026-10-12
 
 ### Added

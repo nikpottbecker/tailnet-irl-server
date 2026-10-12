@@ -28,6 +28,12 @@ DEFAULT_PROFILE: dict[str, object] = {
     "srt_latency": 2_000,
     "adaptive_bitrate": True,
 }
+DEFAULT_RECORDING: dict[str, object] = {
+    "enabled": False,
+    "format": "fmp4",
+    "segment_duration": "15m",
+    "delete_after": "0s",
+}
 ICON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 <rect width="512" height="512" rx="96" fill="#071019"/>
 <path d="M112 360a204 204 0 0 1 288 0" fill="none" stroke="#ffb000" stroke-width="42" stroke-linecap="round"/>
@@ -112,6 +118,35 @@ def read_profile(path: Path | None = None) -> dict[str, object]:
         }
     )
     return profile
+
+
+def read_recording(path: Path | None = None) -> dict[str, object]:
+    recording = dict(DEFAULT_RECORDING)
+    recording_path = path or CONFIG_DIR / "recording.env"
+    if not recording_path.exists():
+        return recording
+    values = read_env_file(recording_path)
+    enabled = values.get("RECORDING_ENABLED", "false").lower()
+    file_format = values.get("RECORDING_FORMAT", "fmp4").lower()
+    segment_duration = values.get("RECORDING_SEGMENT_DURATION", "15m")
+    delete_after = values.get("RECORDING_DELETE_AFTER", "0s")
+    if enabled not in {"true", "false"}:
+        raise RuntimeError("RECORDING_ENABLED must be true or false")
+    if file_format not in {"fmp4", "mpegts"}:
+        raise RuntimeError("RECORDING_FORMAT must be fmp4 or mpegts")
+    if not re.fullmatch(r"[1-9][0-9]*[smh]", segment_duration):
+        raise RuntimeError("invalid RECORDING_SEGMENT_DURATION")
+    if not re.fullmatch(r"[0-9]+[smhd]", delete_after):
+        raise RuntimeError("invalid RECORDING_DELETE_AFTER")
+    recording.update(
+        {
+            "enabled": enabled == "true",
+            "format": file_format,
+            "segment_duration": segment_duration,
+            "delete_after": delete_after,
+        }
+    )
+    return recording
 
 
 def offline_state() -> dict[str, object]:
@@ -232,8 +267,10 @@ def render_page(
     credentials: dict[str, str],
     state: dict[str, object],
     profile: dict[str, object] | None = None,
+    recording: dict[str, object] | None = None,
 ) -> str:
     stream_profile = profile or DEFAULT_PROFILE
+    recording_config = recording or DEFAULT_RECORDING
     links = connection_data(ip, credentials, stream_profile)
     status, status_class = status_presentation(state)
 
@@ -259,7 +296,7 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <section><h2>2 · OBS auf dem PC</h2><p>Medienquelle → Lokale Datei aus → Eingabeformat <b>mpegts</b>.</p><code id="obs">{esc(links['srt_read'])}</code><button data-copy-target="obs">OBS-Link kopieren</button></section>
 <section><h2>Fallback für Moblin</h2><p>Falls SRT in einem Netz blockiert ist, RTMP testen.</p><code id="rtmp">{esc(links['rtmp_publish'])}</code><button data-copy-target="rtmp">RTMP-Link kopieren</button></section>
 <section><h2>Vorschau</h2><p>LL-HLS oder WebRTC; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">LL-HLS öffnen</a> <a class="button" href="{esc(links['webrtc_preview'])}">WebRTC öffnen</a></section>
-<section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
+<section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Recording: <b>{'aktiv' if recording_config['enabled'] else 'aus'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
 <section><h2>Alternative für VLC</h2><p>RTSP ist für VLC/FFmpeg meist die einfachste Leseverbindung.</p><code id="rtsp">{esc(links['rtsp_read'])}</code><button data-copy-target="rtsp">RTSP-Link kopieren</button></section>
 </div>
 <footer>Tailnet IRL Server v{esc(app_version())} · This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
@@ -397,6 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.credentials,  # type: ignore[attr-defined]
                 stream_state(),
                 self.server.profile,  # type: ignore[attr-defined]
+                self.server.recording,  # type: ignore[attr-defined]
             ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -427,6 +465,7 @@ def main() -> None:
     server = ThreadingHTTPServer((ip, int(os.environ.get("PORT", "8090"))), Handler)
     server.credentials = read_credentials()  # type: ignore[attr-defined]
     server.profile = read_profile()  # type: ignore[attr-defined]
+    server.recording = read_recording()  # type: ignore[attr-defined]
     print(f"IRL dashboard listening on http://{ip}:{server.server_port}")
     try:
         server.serve_forever()

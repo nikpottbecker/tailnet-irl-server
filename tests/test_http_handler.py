@@ -21,6 +21,7 @@ class HTTPHandlerTests(unittest.TestCase):
             "READ_PASSWORD": "readersecret123456789012",
         }
         self.server.profile = dict(status_server.DEFAULT_PROFILE)
+        self.server.recording = dict(status_server.DEFAULT_RECORDING)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"

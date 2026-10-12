@@ -39,6 +39,11 @@ sed \
   -e 's/127.0.0.1:9998/127.0.0.1:19998/g' \
   -e "s|__PUBLISH_SHA256__|$PUBLISH_HASH|g" \
   -e "s|__READ_SHA256__|$READ_HASH|g" \
+  -e 's|__RECORDING_ENABLED__|true|g' \
+  -e "s|__RECORDING_PATH__|$TEST_DIR/recordings|g" \
+  -e 's|__RECORDING_FORMAT__|fmp4|g' \
+  -e 's|__RECORDING_SEGMENT_DURATION__|2s|g' \
+  -e 's|__RECORDING_DELETE_AFTER__|0s|g' \
   mediamtx.template.yml > "$TEST_DIR/mediamtx.yml"
 
 "$TEST_DIR/mediamtx" "$TEST_DIR/mediamtx.yml" >"$TEST_DIR/mediamtx.log" 2>&1 &
@@ -71,6 +76,15 @@ ffprobe -v error -show_entries stream=codec_name,codec_type -of json \
 grep -q '"codec_name": "h264"' "$TEST_DIR/probe.json"
 grep -q '"codec_name": "aac"' "$TEST_DIR/probe.json"
 
-echo "OK: authenticated SRT publish/read with H.264 video and AAC audio"
+wait "$PUB_PID"
+PUB_PID=""
+for _ in {1..20}; do
+  RECORDING="$(find "$TEST_DIR/recordings" -type f -name '*.mp4' -size +0c -print -quit 2>/dev/null || true)"
+  [[ -n "$RECORDING" ]] && break
+  sleep 0.2
+done
+[[ -n "$RECORDING" ]] || { cat "$TEST_DIR/mediamtx.log" >&2; exit 1; }
+
+echo "OK: authenticated SRT publish/read and fMP4 recording with H.264/AAC"
 cat "$TEST_DIR/probe.json"
 echo "Test artifacts: $TEST_DIR"

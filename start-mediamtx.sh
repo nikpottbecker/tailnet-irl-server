@@ -5,6 +5,8 @@ CONFIG_DIR="${IRL_CONFIG_DIR:-/etc/irl-server}"
 STATE_DIR="${IRL_STATE_DIR:-/var/lib/irl-server}"
 TEMPLATE="${IRL_TEMPLATE:-$CONFIG_DIR/mediamtx.template.yml}"
 CREDENTIALS="${IRL_CREDENTIALS:-$CONFIG_DIR/credentials.env}"
+RECORDING_CONFIG="${IRL_RECORDING_CONFIG:-$CONFIG_DIR/recording.env}"
+RECORDING_DIR="${IRL_RECORDING_DIR:-$STATE_DIR/recordings}"
 OUTPUT="$STATE_DIR/mediamtx.yml"
 
 die() {
@@ -29,6 +31,7 @@ MEDIAMTX_BIN="${MEDIAMTX_BIN:-/usr/local/bin/mediamtx}"
 [[ -x "$MEDIAMTX_BIN" ]] || die "MediaMTX binary is not executable: $MEDIAMTX_BIN"
 [[ -r "$TEMPLATE" ]] || die "configuration template is not readable: $TEMPLATE"
 [[ -r "$CREDENTIALS" ]] || die "credentials file is not readable: $CREDENTIALS"
+[[ -r "$RECORDING_CONFIG" ]] || die "recording configuration is not readable: $RECORDING_CONFIG"
 
 # credentials.env is generated locally by install.sh and contains only shell-safe
 # alphanumeric secrets. It is never printed by this launcher.
@@ -43,11 +46,32 @@ is_tailscale_ipv4 "$TAILSCALE_IP" || die "no active Tailscale IPv4 address"
 PUBLISH_SHA256="$(printf '%s' "$PUBLISH_PASSWORD" | openssl dgst -binary -sha256 | openssl base64 -A)"
 READ_SHA256="$(printf '%s' "$READ_PASSWORD" | openssl dgst -binary -sha256 | openssl base64 -A)"
 
-mkdir -p "$STATE_DIR"
+config_value() {
+  local key="$1" default="$2" result
+  result="$(awk -F= -v key="$key" '$1 == key {value=substr($0, index($0, "=") + 1)} END {print value}' "$RECORDING_CONFIG")"
+  printf '%s' "${result:-$default}"
+}
+
+RECORDING_ENABLED="$(config_value RECORDING_ENABLED false)"
+RECORDING_FORMAT="$(config_value RECORDING_FORMAT fmp4)"
+RECORDING_SEGMENT_DURATION="$(config_value RECORDING_SEGMENT_DURATION 15m)"
+RECORDING_DELETE_AFTER="$(config_value RECORDING_DELETE_AFTER 0s)"
+[[ "$RECORDING_ENABLED" == true || "$RECORDING_ENABLED" == false ]] || die "RECORDING_ENABLED must be true or false"
+[[ "$RECORDING_FORMAT" == fmp4 || "$RECORDING_FORMAT" == mpegts ]] || die "RECORDING_FORMAT must be fmp4 or mpegts"
+[[ "$RECORDING_SEGMENT_DURATION" =~ ^[1-9][0-9]*[smh]$ ]] || die "invalid RECORDING_SEGMENT_DURATION"
+[[ "$RECORDING_DELETE_AFTER" =~ ^[0-9]+[smhd]$ ]] || die "invalid RECORDING_DELETE_AFTER"
+[[ "$RECORDING_DIR" != *$'\n'* && "$RECORDING_DIR" != *'"'* && "$RECORDING_DIR" != *'|'* ]] || die "invalid recording directory"
+
+mkdir -p "$STATE_DIR" "$RECORDING_DIR"
 sed \
   -e "s/__TAILSCALE_IP__/$TAILSCALE_IP/g" \
   -e "s|__PUBLISH_SHA256__|$PUBLISH_SHA256|g" \
   -e "s|__READ_SHA256__|$READ_SHA256|g" \
+  -e "s|__RECORDING_ENABLED__|$RECORDING_ENABLED|g" \
+  -e "s|__RECORDING_PATH__|$RECORDING_DIR|g" \
+  -e "s|__RECORDING_FORMAT__|$RECORDING_FORMAT|g" \
+  -e "s|__RECORDING_SEGMENT_DURATION__|$RECORDING_SEGMENT_DURATION|g" \
+  -e "s|__RECORDING_DELETE_AFTER__|$RECORDING_DELETE_AFTER|g" \
   "$TEMPLATE" > "$OUTPUT.tmp"
 chmod 0600 "$OUTPUT.tmp"
 mv "$OUTPUT.tmp" "$OUTPUT"

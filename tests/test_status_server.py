@@ -78,6 +78,32 @@ class StatusServerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "VIDEO_RESOLUTION"):
                 status_server.read_profile(path)
 
+    def test_recording_configuration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "recording.env"
+            path.write_text(
+                "RECORDING_ENABLED=true\n"
+                "RECORDING_FORMAT=mpegts\n"
+                "RECORDING_SEGMENT_DURATION=10m\n"
+                "RECORDING_DELETE_AFTER=7d\n"
+            )
+            self.assertEqual(
+                status_server.read_recording(path),
+                {
+                    "enabled": True,
+                    "format": "mpegts",
+                    "segment_duration": "10m",
+                    "delete_after": "7d",
+                },
+            )
+
+    def test_invalid_recording_configuration_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "recording.env"
+            path.write_text("RECORDING_ENABLED=sometimes\n")
+            with self.assertRaisesRegex(RuntimeError, "RECORDING_ENABLED"):
+                status_server.read_recording(path)
+
     def test_dashboard_escapes_secrets(self):
         credentials = {
             "PUBLISH_PASSWORD": "secret&publisher123456789",

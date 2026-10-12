@@ -54,7 +54,12 @@ moq: false
 pathDefaults:
   source: publisher
   overridePublisher: true
-  record: false
+  record: __RECORDING_ENABLED__
+  recordPath: "__RECORDING_PATH__/%path/%Y-%m-%d_%H-%M-%S-%f"
+  recordFormat: __RECORDING_FORMAT__
+  recordPartDuration: 1s
+  recordSegmentDuration: __RECORDING_SEGMENT_DURATION__
+  recordDeleteAfter: __RECORDING_DELETE_AFTER__
 
 paths:
   live: {}

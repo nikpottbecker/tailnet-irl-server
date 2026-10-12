@@ -72,10 +72,14 @@ install -d -o root -g root -m 0755 "$INSTALL_DIR"
 install -m 0755 "$SOURCE_DIR/start-mediamtx.sh" "$INSTALL_DIR/start-mediamtx.sh"
 install -m 0755 "$SOURCE_DIR/status_server.py" "$INSTALL_DIR/status_server.py"
 install -m 0755 "$SOURCE_DIR/rotate-credentials.sh" "$INSTALL_DIR/rotate-credentials.sh"
+install -m 0755 "$SOURCE_DIR/recording.sh" "$INSTALL_DIR/recording.sh"
 install -m 0644 "$SOURCE_DIR/VERSION" "$INSTALL_DIR/VERSION"
 install -m 0640 -o root -g irl-server "$SOURCE_DIR/mediamtx.template.yml" "$CONFIG_DIR/mediamtx.template.yml"
 if [[ ! -f "$CONFIG_DIR/profile.env" ]]; then
   install -m 0640 -o root -g irl-server "$SOURCE_DIR/profile.env.example" "$CONFIG_DIR/profile.env"
+fi
+if [[ ! -f "$CONFIG_DIR/recording.env" ]]; then
+  install -m 0640 -o root -g irl-server "$SOURCE_DIR/recording.env.example" "$CONFIG_DIR/recording.env"
 fi
 
 if [[ ! -f "$CONFIG_DIR/credentials.env" ]]; then

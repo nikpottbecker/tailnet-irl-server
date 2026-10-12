@@ -140,6 +140,8 @@ Run the local end-to-end test to publish and read an authenticated H.264/AAC str
 ./tests/e2e-local.sh
 ```
 
+The test also verifies that the stream is written as a valid, non-empty fMP4 recording.
+
 Running the appropriate installer again updates the program while retaining the generated credentials.
 
 Rotate both credentials if a connection URL was exposed. This invalidates all existing Moblin, OBS and VLC URLs:
@@ -153,6 +155,20 @@ sudo ./rotate-credentials.sh --yes
 ```
 
 After rotation, import Moblin again and copy fresh receiver URLs from the dashboard.
+
+### Optional server-side recording
+
+Recording is disabled by default. Enable it when a production needs a local safety copy:
+
+```bash
+# macOS
+./recording.sh enable
+
+# Linux
+sudo ./recording.sh enable
+```
+
+Use `./recording.sh status`, `./recording.sh list` or `./recording.sh disable` as needed. Recordings are stored below the platform state directory and are intentionally retained during uninstall. Format, segment duration and automatic retention are configured in the update-safe `recording.env` file.
 
 ### Customize the Moblin profile
 
