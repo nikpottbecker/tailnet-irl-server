@@ -10,6 +10,7 @@ All notable changes to Tailnet IRL Server are documented here.
 - Add a validated, update-safe `profile.env` for customizing Moblin resolution, frame rate, bitrates and SRT latency.
 - Run cross-platform unit, shell and credential checks plus an authenticated SRT end-to-end test in GitHub Actions.
 - Add direct WebRTC preview, a branded PWA icon and `/api/version` for installed-version checks.
+- Pin CI to Ubuntu 24.04 and Node 24-based official GitHub Actions.
 
 ## 1.1.0 — 2026-10-12
 
