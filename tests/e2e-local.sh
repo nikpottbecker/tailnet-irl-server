@@ -35,6 +35,8 @@ PUBLISH_HASH="$(printf '%s' "$PUBLISH_PASSWORD" | openssl dgst -binary -sha256 |
 READ_HASH="$(printf '%s' "$READ_PASSWORD" | openssl dgst -binary -sha256 | openssl base64 -A)"
 sed \
   -e 's/__TAILSCALE_IP__/127.0.0.1/g' \
+  -e 's/127.0.0.1:9997/127.0.0.1:19997/g' \
+  -e 's/127.0.0.1:9998/127.0.0.1:19998/g' \
   -e "s|__PUBLISH_SHA256__|$PUBLISH_HASH|g" \
   -e "s|__READ_SHA256__|$READ_HASH|g" \
   mediamtx.template.yml > "$TEST_DIR/mediamtx.yml"
@@ -42,10 +44,10 @@ sed \
 "$TEST_DIR/mediamtx" "$TEST_DIR/mediamtx.yml" >"$TEST_DIR/mediamtx.log" 2>&1 &
 MTX_PID="$!"
 for _ in {1..30}; do
-  curl -fsS http://127.0.0.1:9997/v3/info >/dev/null 2>&1 && break
+  curl -fsS http://127.0.0.1:19997/v3/info >/dev/null 2>&1 && break
   sleep 0.2
 done
-curl -fsS http://127.0.0.1:9997/v3/info >/dev/null
+curl -fsS http://127.0.0.1:19997/v3/info >/dev/null
 
 ffmpeg -hide_banner -loglevel error -re \
   -f lavfi -i testsrc2=size=640x360:rate=25 \
@@ -57,7 +59,7 @@ ffmpeg -hide_banner -loglevel error -re \
 PUB_PID="$!"
 
 for _ in {1..30}; do
-  STATE="$(curl -fsS http://127.0.0.1:9997/v3/paths/get/live 2>/dev/null || true)"
+  STATE="$(curl -fsS http://127.0.0.1:19997/v3/paths/get/live 2>/dev/null || true)"
   [[ "$STATE" == *'"ready":true'* ]] && break
   sleep 0.2
 done
