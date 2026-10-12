@@ -1,6 +1,7 @@
 # Tailnet IRL Server
 
 [![Release](https://img.shields.io/github/v/release/nikpottbecker/tailnet-irl-server?display_name=tag&sort=semver)](https://github.com/nikpottbecker/tailnet-irl-server/releases)
+[![CI](https://github.com/nikpottbecker/tailnet-irl-server/actions/workflows/ci.yml/badge.svg)](https://github.com/nikpottbecker/tailnet-irl-server/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-BSD%20Advertising-blue)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Wiki-2563EB)](https://github.com/nikpottbecker/tailnet-irl-server/wiki)
 [![macOS](https://img.shields.io/badge/macOS-native-111827?logo=apple)](#macos)
@@ -31,6 +32,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 - **Automatic credentials:** publisher and viewer secrets are generated locally and kept out of logs.
 - **Reproducible install:** the MediaMTX download is checked against its official SHA-256 manifest.
 - **Self-test included:** verify Tailnet binding, services and the MediaMTX API at any time.
+- **Continuously verified:** macOS/Linux unit checks and an authenticated H.264/AAC SRT end-to-end test run on GitHub Actions.
 
 ## Quick start
 

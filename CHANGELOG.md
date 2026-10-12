@@ -8,6 +8,7 @@ All notable changes to Tailnet IRL Server are documented here.
 
 - Show live input bitrate, stream uptime, media tracks and outbound traffic in the dashboard.
 - Add a validated, update-safe `profile.env` for customizing Moblin resolution, frame rate, bitrates and SRT latency.
+- Run cross-platform unit, shell and credential checks plus an authenticated SRT end-to-end test in GitHub Actions.
 
 ## 1.1.0 — 2026-10-12
 
