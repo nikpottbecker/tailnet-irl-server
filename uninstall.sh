@@ -10,7 +10,7 @@ systemctl daemon-reload
 # Konfiguration und Passwörter bleiben absichtlich erhalten, damit eine
 # Neuinstallation dieselben Moblin-/OBS-Links weiterverwenden kann.
 rm -rf /opt/irl-server
-rm -f /usr/local/bin/mediamtx
+rm -f /usr/local/bin/mediamtx /usr/local/bin/irl-serverctl
 
 echo "Dienste und Programmdateien wurden entfernt."
 echo "Erhalten: /etc/irl-server und /var/lib/irl-server"

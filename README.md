@@ -33,6 +33,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 - **Automatic credentials:** publisher and viewer secrets are generated locally and kept out of logs.
 - **Reproducible install:** the MediaMTX download is checked against its official SHA-256 manifest.
 - **Self-test included:** verify Tailnet binding, services and the MediaMTX API at any time.
+- **One control command:** inspect services, recordings and available releases with `irl-serverctl`.
 - **Continuously verified:** macOS/Linux unit checks and an authenticated H.264/AAC SRT end-to-end test run on GitHub Actions.
 
 ## Quick start
@@ -118,6 +119,18 @@ The dashboard also provides an RTSP URL for VLC or FFmpeg and an authenticated b
 The dashboard contains working connection URLs and should only be reachable by trusted Tailnet devices. Restrict access further with Tailscale grants or ACLs when multiple people share the Tailnet.
 
 ## Operations
+
+The installed management command summarizes the complete service state without displaying credentials:
+
+```bash
+# macOS
+"$HOME/Library/Application Support/IRL Server/app/irl-serverctl" status
+
+# Linux
+irl-serverctl status
+```
+
+Use `irl-serverctl check-update` to compare the installed version with the latest GitHub release. It only checks and reports; it never installs an update automatically. `irl-serverctl restart` restarts both services, and `irl-serverctl recording status` delegates to the recording control safely.
 
 Linux:
 

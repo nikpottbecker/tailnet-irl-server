@@ -48,6 +48,7 @@ install -m 0755 "$SOURCE_DIR/start-mediamtx.sh" "$INSTALL_DIR/start-mediamtx.sh"
 install -m 0755 "$SOURCE_DIR/status_server.py" "$INSTALL_DIR/status_server.py"
 install -m 0755 "$SOURCE_DIR/rotate-credentials.sh" "$INSTALL_DIR/rotate-credentials.sh"
 install -m 0755 "$SOURCE_DIR/recording.sh" "$INSTALL_DIR/recording.sh"
+install -m 0755 "$SOURCE_DIR/irl-serverctl" "$INSTALL_DIR/irl-serverctl"
 install -m 0644 "$SOURCE_DIR/VERSION" "$INSTALL_DIR/VERSION"
 install -m 0600 "$SOURCE_DIR/mediamtx.template.yml" "$CONFIG_DIR/mediamtx.template.yml"
 if [[ ! -f "$CONFIG_DIR/profile.env" ]]; then
@@ -119,4 +120,5 @@ curl -fsS --max-time 2 "http://$TAILSCALE_IP:8090/healthz" >/dev/null || {
 
 echo "IRL Server läuft nativ auf diesem Mac."
 echo "Dashboard: http://$TAILSCALE_IP:8090"
+echo "Verwaltung: \"$INSTALL_DIR/irl-serverctl\" status"
 echo "Logs: $LOG_DIR"

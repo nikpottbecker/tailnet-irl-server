@@ -4,6 +4,11 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+### Added
+
+- Add `irl-serverctl` for consolidated status, version, release, restart and recording controls.
+- Test the management command on both supported CI operating systems.
+
 ## 1.3.0 — 2026-10-12
 
 ### Added
