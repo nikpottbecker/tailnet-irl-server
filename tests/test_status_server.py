@@ -71,17 +71,45 @@ class StatusServerTests(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=response):
             self.assertEqual(
                 status_server.stream_state(),
-                {"online": False, "ready": False, "readers": 0, "bytes": 0},
+                status_server.offline_state(),
             )
 
     def test_stream_state_tolerates_invalid_item_fields(self):
         response = BytesIO(
-            b'{"items":[null,{"name":"live","ready":true,"readers":"bad","bytesReceived":"bad"}]}'
+            b'{"items":[null,{"name":"live","ready":true,"readers":"bad","bytesReceived":"bad","bytesSent":"bad","readyTime":42,"tracks":"bad"}]}'
         )
         with patch("urllib.request.urlopen", return_value=response):
             self.assertEqual(
                 status_server.stream_state(),
-                {"online": True, "ready": True, "readers": 0, "bytes": 0},
+                {
+                    "online": True,
+                    "ready": True,
+                    "readers": 0,
+                    "bytes": 0,
+                    "bytes_sent": 0,
+                    "ready_since": None,
+                    "tracks": [],
+                },
+            )
+
+    def test_stream_state_exposes_live_telemetry(self):
+        response = BytesIO(
+            b'{"items":[{"name":"live","ready":true,"readers":[{},{}],'
+            b'"inboundBytes":1250000,"outboundBytes":2500000,'
+            b'"readyTime":"2026-10-12T05:00:00Z","tracks":["H264","MPEG-4 Audio"]}]}'
+        )
+        with patch("urllib.request.urlopen", return_value=response):
+            self.assertEqual(
+                status_server.stream_state(),
+                {
+                    "online": True,
+                    "ready": True,
+                    "readers": 2,
+                    "bytes": 1_250_000,
+                    "bytes_sent": 2_500_000,
+                    "ready_since": "2026-10-12T05:00:00Z",
+                    "tracks": ["H264", "MPEG-4 Audio"],
+                },
             )
 
 

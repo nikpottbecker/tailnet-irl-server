@@ -10,7 +10,7 @@ import status_server
 
 class HTTPHandlerTests(unittest.TestCase):
     def setUp(self):
-        self.state = {"online": False, "ready": False, "readers": 0, "bytes": 0}
+        self.state = status_server.offline_state()
         self.state_patch = patch("status_server.stream_state", side_effect=lambda: self.state)
         self.state_patch.start()
         self.server = status_server.ThreadingHTTPServer(

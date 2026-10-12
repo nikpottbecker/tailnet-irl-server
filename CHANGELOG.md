@@ -4,6 +4,10 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+### Added
+
+- Show live input bitrate, stream uptime, media tracks and outbound traffic in the dashboard.
+
 ## 1.1.0 — 2026-10-12
 
 ### Fixed

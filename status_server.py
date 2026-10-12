@@ -42,6 +42,18 @@ def read_credentials(path: Path | None = None) -> dict[str, str]:
     return values
 
 
+def offline_state() -> dict[str, object]:
+    return {
+        "online": False,
+        "ready": False,
+        "readers": 0,
+        "bytes": 0,
+        "bytes_sent": 0,
+        "ready_since": None,
+        "tracks": [],
+    }
+
+
 def tailscale_ip() -> str:
     value = os.environ.get("TAILSCALE_IP")
     if not value:
@@ -62,21 +74,31 @@ def stream_state() -> dict[str, object]:
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
             raise ValueError("unexpected MediaMTX API response")
     except (OSError, urllib.error.URLError, TypeError, ValueError):
-        return {"online": False, "ready": False, "readers": 0, "bytes": 0}
+        return offline_state()
 
     for item in payload["items"]:
         if not isinstance(item, dict):
             continue
         if item.get("name") == "live":
             readers = item.get("readers")
-            received = item.get("bytesReceived", 0)
+            received = item.get("inboundBytes", item.get("bytesReceived", 0))
+            sent = item.get("outboundBytes", item.get("bytesSent", 0))
+            tracks = item.get("tracks")
+            ready_since = item.get("readyTime")
             return {
                 "online": True,
                 "ready": bool(item.get("ready")),
                 "readers": len(readers) if isinstance(readers, list) else 0,
                 "bytes": int(received) if isinstance(received, (int, float)) else 0,
+                "bytes_sent": int(sent) if isinstance(sent, (int, float)) else 0,
+                "ready_since": ready_since if isinstance(ready_since, str) else None,
+                "tracks": [str(track) for track in tracks]
+                if isinstance(tracks, list)
+                else [],
             }
-    return {"online": True, "ready": False, "readers": 0, "bytes": 0}
+    state = offline_state()
+    state["online"] = True
+    return state
 
 
 def connection_data(ip: str, credentials: dict[str, str]) -> dict[str, str]:
@@ -150,28 +172,55 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <section><h2>2 · OBS auf dem PC</h2><p>Medienquelle → Lokale Datei aus → Eingabeformat <b>mpegts</b>.</p><code id="obs">{esc(links['srt_read'])}</code><button data-copy-target="obs">OBS-Link kopieren</button></section>
 <section><h2>Fallback für Moblin</h2><p>Falls SRT in einem Netz blockiert ist, RTMP testen.</p><code id="rtmp">{esc(links['rtmp_publish'])}</code><button data-copy-target="rtmp">RTMP-Link kopieren</button></section>
 <section><h2>Vorschau</h2><p>Browser-Vorschau über LL-HLS; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">Vorschau öffnen</a></section>
-<section><h2>Status</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b></p></section>
+<section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
 <section><h2>Alternative für VLC</h2><p>RTSP ist für VLC/FFmpeg meist die einfachste Leseverbindung.</p><code id="rtsp">{esc(links['rtsp_read'])}</code><button data-copy-target="rtsp">RTSP-Link kopieren</button></section>
 </div>
 <footer>This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
 <script>
 const badge = document.querySelector('#status-badge');
+let previousBytes = null;
+let previousSampleAt = null;
+function formatDuration(value) {{
+  const started = Date.parse(value || '');
+  if (!Number.isFinite(started)) return '–';
+  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${{hours}}:${{String(minutes).padStart(2, '0')}}:${{String(remainder).padStart(2, '0')}}`
+    : `${{minutes}}:${{String(remainder).padStart(2, '0')}}`;
+}}
 function showStatus(state) {{
   const online = Boolean(state.online);
   const ready = Boolean(state.ready);
+  const bytes = Number(state.bytes || 0);
+  const sampleAt = performance.now();
+  let bitrate = 0;
+  if (ready && previousBytes !== null && bytes >= previousBytes && previousSampleAt !== null) {{
+    const seconds = (sampleAt - previousSampleAt) / 1000;
+    if (seconds > 0) bitrate = ((bytes - previousBytes) * 8) / seconds / 1000000;
+  }}
   badge.textContent = !online ? 'SERVER NICHT ERREICHBAR' : ready ? 'LIVE' : 'WARTET AUF HANDY';
   badge.className = `badge ${{!online ? 'error' : ready ? 'live' : 'idle'}}`;
   document.querySelector('#server-state').textContent = online ? 'bereit' : 'nicht erreichbar';
   document.querySelector('#feed-state').textContent = ready ? 'aktiv' : 'offline';
+  document.querySelector('#bitrate').textContent = `${{bitrate.toFixed(2)}} Mbit/s`;
+  document.querySelector('#uptime').textContent = ready ? formatDuration(state.ready_since) : '–';
   document.querySelector('#reader-count').textContent = Number(state.readers || 0).toLocaleString('de-DE');
-  document.querySelector('#received-bytes').textContent = `${{(Number(state.bytes || 0) / 1000000).toFixed(1)}} MB`;
+  document.querySelector('#received-bytes').textContent = `${{(bytes / 1000000).toFixed(1)}} MB`;
+  document.querySelector('#sent-bytes').textContent = `${{(Number(state.bytes_sent || 0) / 1000000).toFixed(1)}} MB`;
+  const tracks = Array.isArray(state.tracks) ? state.tracks : [];
+  document.querySelector('#tracks').textContent = tracks.length ? tracks.join(', ') : '–';
+  previousBytes = ready ? bytes : null;
+  previousSampleAt = ready ? sampleAt : null;
 }}
 async function refreshStatus() {{
   try {{
     const response = await fetch('/api/status', {{cache: 'no-store'}});
     showStatus(await response.json());
   }} catch (_) {{
-    showStatus({{online: false, ready: false, readers: 0, bytes: 0}});
+    showStatus({{online: false, ready: false, readers: 0, bytes: 0, bytes_sent: 0, ready_since: null, tracks: []}});
   }}
 }}
 async function copyText(value) {{
