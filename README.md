@@ -29,6 +29,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 - **OBS-ready:** copy the authenticated SRT reader URL straight from the dashboard.
 - **Native services:** launchd on macOS and systemd on Debian or Ubuntu.
 - **Multiple outputs:** SRT, RTSP, RTMP, LL-HLS and WebRTC through MediaMTX.
+- **Installable dashboard:** PWA identity, direct LL-HLS/WebRTC previews and a machine-readable version endpoint.
 - **Automatic credentials:** publisher and viewer secrets are generated locally and kept out of logs.
 - **Reproducible install:** the MediaMTX download is checked against its official SHA-256 manifest.
 - **Self-test included:** verify Tailnet binding, services and the MediaMTX API at any time.

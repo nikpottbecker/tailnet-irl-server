@@ -28,6 +28,22 @@ DEFAULT_PROFILE: dict[str, object] = {
     "srt_latency": 2_000,
     "adaptive_bitrate": True,
 }
+ICON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="96" fill="#071019"/>
+<path d="M112 360a204 204 0 0 1 288 0" fill="none" stroke="#ffb000" stroke-width="42" stroke-linecap="round"/>
+<path d="M171 299a120 120 0 0 1 170 0" fill="none" stroke="#ffb000" stroke-width="42" stroke-linecap="round"/>
+<circle cx="256" cy="363" r="34" fill="#39d98a"/>
+<text x="256" y="155" text-anchor="middle" fill="#f6f8fa" font-family="system-ui,sans-serif" font-size="88" font-weight="800">IRL</text>
+</svg>"""
+
+
+def app_version(path: Path | None = None) -> str:
+    version_path = path or Path(__file__).with_name("VERSION")
+    try:
+        value = version_path.read_text().strip()
+    except OSError:
+        return "development"
+    return value if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", value) else "development"
 
 
 def is_tailscale_ipv4(value: str) -> bool:
@@ -199,6 +215,7 @@ def connection_data(
         "rtmp_publish": f"rtmp://{ip}:1935/live?user=mobile&pass={publish}",
         "moblin": "moblin://?" + urllib.parse.quote(compact, safe=""),
         "preview": f"http://{ip}:8888/live",
+        "webrtc_preview": f"http://{ip}:8889/live",
     }
 
 
@@ -225,7 +242,7 @@ def render_page(
 
     return f"""<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#071019"><link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#071019"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="IRL Server">
 <title>IRL Server</title>
 <style>
@@ -241,11 +258,11 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <section><h2>1 · iPhone / Moblin</h2><p>Tailscale verbinden, dann Moblin automatisch konfigurieren.</p><a class="button" href="{esc(links['moblin'])}">In Moblin öffnen</a><p><small>H.264 · {esc(stream_profile['video_resolution'])}p{esc(stream_profile['video_fps'])} · {float(stream_profile['video_bitrate']) / 1_000_000:g} Mbit/s · SRT {esc(stream_profile['srt_latency'])} ms · adaptive Bitrate {'an' if stream_profile['adaptive_bitrate'] else 'aus'}</small></p></section>
 <section><h2>2 · OBS auf dem PC</h2><p>Medienquelle → Lokale Datei aus → Eingabeformat <b>mpegts</b>.</p><code id="obs">{esc(links['srt_read'])}</code><button data-copy-target="obs">OBS-Link kopieren</button></section>
 <section><h2>Fallback für Moblin</h2><p>Falls SRT in einem Netz blockiert ist, RTMP testen.</p><code id="rtmp">{esc(links['rtmp_publish'])}</code><button data-copy-target="rtmp">RTMP-Link kopieren</button></section>
-<section><h2>Vorschau</h2><p>Browser-Vorschau über LL-HLS; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">Vorschau öffnen</a></section>
+<section><h2>Vorschau</h2><p>LL-HLS oder WebRTC; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">LL-HLS öffnen</a> <a class="button" href="{esc(links['webrtc_preview'])}">WebRTC öffnen</a></section>
 <section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
 <section><h2>Alternative für VLC</h2><p>RTSP ist für VLC/FFmpeg meist die einfachste Leseverbindung.</p><code id="rtsp">{esc(links['rtsp_read'])}</code><button data-copy-target="rtsp">RTSP-Link kopieren</button></section>
 </div>
-<footer>This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
+<footer>Tailnet IRL Server v{esc(app_version())} · This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
 <script>
 const badge = document.querySelector('#status-badge');
 let previousBytes = null;
@@ -340,6 +357,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
+        elif path == "/api/version":
+            body = json.dumps(
+                {"name": "Tailnet IRL Server", "version": app_version()}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "public, max-age=300")
         elif path == "/manifest.webmanifest":
             body = json.dumps(
                 {
@@ -349,10 +373,23 @@ class Handler(BaseHTTPRequestHandler):
                     "display": "standalone",
                     "background_color": "#071019",
                     "theme_color": "#071019",
+                    "icons": [
+                        {
+                            "src": "/icon.svg",
+                            "sizes": "any",
+                            "type": "image/svg+xml",
+                            "purpose": "any maskable",
+                        }
+                    ],
                 }
             ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/manifest+json")
+            self.send_header("Cache-Control", "public, max-age=86400")
+        elif path == "/icon.svg":
+            body = ICON_SVG
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
             self.send_header("Cache-Control", "public, max-age=86400")
         elif path == "/":
             body = render_page(

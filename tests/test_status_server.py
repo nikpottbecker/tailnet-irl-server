@@ -10,6 +10,14 @@ import status_server
 
 
 class StatusServerTests(unittest.TestCase):
+    def test_version_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "VERSION"
+            path.write_text("1.2.3-beta.1\n")
+            self.assertEqual(status_server.app_version(path), "1.2.3-beta.1")
+            path.write_text("not-a-version\n")
+            self.assertEqual(status_server.app_version(path), "development")
+
     def test_tailscale_ipv4_range(self):
         self.assertTrue(status_server.is_tailscale_ipv4("100.64.0.1"))
         self.assertTrue(status_server.is_tailscale_ipv4("100.127.255.254"))
@@ -26,6 +34,7 @@ class StatusServerTests(unittest.TestCase):
         self.assertIn("streamid=publish:live:mobile:publishsecret", links["srt_publish"])
         self.assertIn("streamid=read:live:studio:readsecret", links["srt_read"])
         self.assertTrue(links["moblin"].startswith("moblin://?"))
+        self.assertEqual(links["webrtc_preview"], "http://100.64.1.2:8889/live")
 
         settings = json.loads(urllib.parse.unquote(links["moblin"].split("?", 1)[1]))
         stream = settings["streams"][0]

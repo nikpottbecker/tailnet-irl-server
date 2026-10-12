@@ -51,6 +51,19 @@ class HTTPHandlerTests(unittest.TestCase):
             self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
             self.assertEqual(response.headers["Server"].strip(), "TailnetIRLServer")
             self.assertIn("SERVER NICHT ERREICHBAR", body)
+            self.assertIn("WebRTC öffnen", body)
+
+    def test_version_manifest_and_icon_endpoints(self):
+        with urllib.request.urlopen(f"{self.base_url}/api/version") as response:
+            payload = json.load(response)
+            self.assertEqual(payload["name"], "Tailnet IRL Server")
+            self.assertRegex(payload["version"], r"^1\.2\.0-dev$")
+        with urllib.request.urlopen(f"{self.base_url}/manifest.webmanifest") as response:
+            manifest = json.load(response)
+            self.assertEqual(manifest["icons"][0]["src"], "/icon.svg")
+        with urllib.request.urlopen(f"{self.base_url}/icon.svg") as response:
+            self.assertEqual(response.headers["Content-Type"], "image/svg+xml")
+            self.assertIn(b"<svg", response.read())
 
 
 if __name__ == "__main__":
