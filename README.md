@@ -139,6 +139,18 @@ Run the local end-to-end test to publish and read an authenticated H.264/AAC str
 
 Running the appropriate installer again updates the program while retaining the generated credentials.
 
+Rotate both credentials if a connection URL was exposed. This invalidates all existing Moblin, OBS and VLC URLs:
+
+```bash
+# macOS
+./rotate-credentials.sh --yes
+
+# Linux
+sudo ./rotate-credentials.sh --yes
+```
+
+After rotation, import Moblin again and copy fresh receiver URLs from the dashboard.
+
 ## Current scope
 
 Tailnet IRL Server provides one reliable SRT contribution path through Tailscale. It does not combine multiple network interfaces. Moblin SRTLA bonding requires a separate SRTLA receiver and is not included.

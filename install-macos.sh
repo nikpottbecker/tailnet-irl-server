@@ -46,6 +46,7 @@ tar -xzf "$TEMP_DIR/$ARCHIVE" -C "$TEMP_DIR" mediamtx
 install -m 0755 "$TEMP_DIR/mediamtx" "$BIN_DIR/mediamtx"
 install -m 0755 "$SOURCE_DIR/start-mediamtx.sh" "$INSTALL_DIR/start-mediamtx.sh"
 install -m 0755 "$SOURCE_DIR/status_server.py" "$INSTALL_DIR/status_server.py"
+install -m 0755 "$SOURCE_DIR/rotate-credentials.sh" "$INSTALL_DIR/rotate-credentials.sh"
 install -m 0600 "$SOURCE_DIR/mediamtx.template.yml" "$CONFIG_DIR/mediamtx.template.yml"
 
 if [[ ! -f "$CONFIG_DIR/credentials.env" ]]; then

@@ -71,6 +71,7 @@ install -d -o root -g root -m 0755 "$INSTALL_DIR"
 
 install -m 0755 "$SOURCE_DIR/start-mediamtx.sh" "$INSTALL_DIR/start-mediamtx.sh"
 install -m 0755 "$SOURCE_DIR/status_server.py" "$INSTALL_DIR/status_server.py"
+install -m 0755 "$SOURCE_DIR/rotate-credentials.sh" "$INSTALL_DIR/rotate-credentials.sh"
 install -m 0640 -o root -g irl-server "$SOURCE_DIR/mediamtx.template.yml" "$CONFIG_DIR/mediamtx.template.yml"
 
 if [[ ! -f "$CONFIG_DIR/credentials.env" ]]; then

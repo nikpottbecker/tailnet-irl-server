@@ -17,6 +17,7 @@ All notable changes to Tailnet IRL Server are documented here.
 - Fall back to legacy clipboard copying on private HTTP addresses where the modern Clipboard API is unavailable.
 - Distinguish a stopped media server from an idle stream in the status badge.
 - Add a cache-free `/api/status` endpoint for the dashboard.
+- Add atomic publisher/reader credential rotation with automatic service restart.
 
 ### Documentation
 

@@ -10,7 +10,9 @@ Bug reports, documentation fixes and focused pull requests are welcome.
    ```bash
    python3 -m unittest discover -s tests -v
    bash -n install.sh install-macos.sh uninstall.sh uninstall-macos.sh \
-     selftest.sh selftest-macos.sh start-mediamtx.sh tests/e2e-local.sh
+     selftest.sh selftest-macos.sh start-mediamtx.sh rotate-credentials.sh \
+     tests/e2e-local.sh tests/test-rotate-credentials.sh
+   ./tests/test-rotate-credentials.sh
    ```
 
 5. Open a pull request with a concise explanation and verification notes.
