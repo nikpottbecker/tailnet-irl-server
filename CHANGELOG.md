@@ -4,6 +4,8 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+## 1.3.0 — 2026-10-12
+
 ### Added
 
 - Add optional server-side fMP4/MPEG-TS recording with configurable segments and retention.
