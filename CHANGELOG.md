@@ -10,6 +10,14 @@ All notable changes to Tailnet IRL Server are documented here.
 - Fail early on macOS when the Python 3 runtime required by the dashboard is missing.
 - Handle malformed MediaMTX API responses without terminating dashboard requests.
 
+### Added
+
+- Update stream state live without reloading the dashboard page.
+- Add copy controls for OBS/SRT, RTMP and RTSP connection URLs.
+- Fall back to legacy clipboard copying on private HTTP addresses where the modern Clipboard API is unavailable.
+- Distinguish a stopped media server from an idle stream in the status badge.
+- Add a cache-free `/api/status` endpoint for the dashboard.
+
 ### Documentation
 
 - Add a complete GitHub Wiki for installation, client setup, security, operations and troubleshooting.

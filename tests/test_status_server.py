@@ -47,7 +47,24 @@ class StatusServerTests(unittest.TestCase):
         self.assertNotIn("secret<reader", page)
         self.assertIn("secret&lt;reader", page)
         self.assertIn("WARTET AUF HANDY", page)
+        self.assertIn('data-copy-target="obs"', page)
+        self.assertIn("fetch('/api/status'", page)
+        self.assertIn("document.execCommand('copy')", page)
         self.assertIn("developed by <a href=\"https://github.com/nikpottbecker\">Nik Pottbecker</a>", page)
+
+    def test_status_presentation(self):
+        self.assertEqual(
+            status_server.status_presentation({"online": False, "ready": False}),
+            ("SERVER NICHT ERREICHBAR", "error"),
+        )
+        self.assertEqual(
+            status_server.status_presentation({"online": True, "ready": False}),
+            ("WARTET AUF HANDY", "idle"),
+        )
+        self.assertEqual(
+            status_server.status_presentation({"online": True, "ready": True}),
+            ("LIVE", "live"),
+        )
 
     def test_stream_state_rejects_invalid_api_shape(self):
         response = BytesIO(b"[]")
