@@ -3,10 +3,13 @@ set -euo pipefail
 
 fail() { echo "NICHT OK: $*" >&2; exit 1; }
 pass() { echo "OK: $*"; }
+is_tailscale_ipv4() {
+  python3 -c 'import ipaddress, sys; raise SystemExit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network("100.64.0.0/10"))' "$1" 2>/dev/null
+}
 
 command -v tailscale >/dev/null 2>&1 || fail "Tailscale fehlt"
 IP="$(tailscale ip -4 2>/dev/null | head -n 1)"
-[[ "$IP" == 100.* ]] || fail "Tailscale ist nicht verbunden"
+is_tailscale_ipv4 "$IP" || fail "Tailscale ist nicht verbunden"
 pass "Tailscale aktiv ($IP)"
 
 systemctl is-active --quiet irl-mediamtx.service || fail "irl-mediamtx ist nicht aktiv"

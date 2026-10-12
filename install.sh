@@ -12,6 +12,10 @@ die() {
   exit 1
 }
 
+is_tailscale_ipv4() {
+  python3 -c 'import ipaddress, sys; raise SystemExit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network("100.64.0.0/10"))' "$1" 2>/dev/null
+}
+
 [[ "$(uname -s)" == "Linux" ]] || die "Der Server-Installer unterstützt Debian/Ubuntu Linux."
 [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "Bitte mit sudo ausführen: sudo ./install.sh"
 command -v systemctl >/dev/null 2>&1 || die "systemd wurde nicht gefunden."
@@ -34,7 +38,7 @@ if ! tailscale ip -4 >/dev/null 2>&1; then
   tailscale up --hostname=irl-server
 fi
 TAILSCALE_IP="$(tailscale ip -4 | head -n 1)"
-[[ "$TAILSCALE_IP" =~ ^100\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || die "Keine aktive Tailscale-IP gefunden."
+is_tailscale_ipv4 "$TAILSCALE_IP" || die "Keine aktive Tailscale-IP gefunden."
 
 case "$(uname -m)" in
   x86_64|amd64) ARCH="amd64" ;;

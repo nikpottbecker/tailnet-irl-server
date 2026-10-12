@@ -12,6 +12,10 @@ die() {
   exit 1
 }
 
+is_tailscale_ipv4() {
+  python3 -c 'import ipaddress, sys; raise SystemExit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network("100.64.0.0/10"))' "$1" 2>/dev/null
+}
+
 if [[ -n "${TAILSCALE_BIN:-}" ]]; then
   :
 elif command -v tailscale >/dev/null 2>&1; then
@@ -34,7 +38,7 @@ source "$CREDENTIALS"
 [[ "${READ_PASSWORD:-}" =~ ^[A-Za-z0-9_-]{20,}$ ]] || die "invalid reader credential"
 
 TAILSCALE_IP="${TAILSCALE_IP:-$("$TAILSCALE_BIN" ip -4 2>/dev/null | head -n 1)}"
-[[ "$TAILSCALE_IP" =~ ^100\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || die "no active Tailscale IPv4 address"
+is_tailscale_ipv4 "$TAILSCALE_IP" || die "no active Tailscale IPv4 address"
 
 PUBLISH_SHA256="$(printf '%s' "$PUBLISH_PASSWORD" | openssl dgst -binary -sha256 | openssl base64 -A)"
 READ_SHA256="$(printf '%s' "$READ_PASSWORD" | openssl dgst -binary -sha256 | openssl base64 -A)"

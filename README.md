@@ -2,6 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/nikpottbecker/tailnet-irl-server?display_name=tag&sort=semver)](https://github.com/nikpottbecker/tailnet-irl-server/releases)
 [![License](https://img.shields.io/badge/license-BSD%20Advertising-blue)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Wiki-2563EB)](https://github.com/nikpottbecker/tailnet-irl-server/wiki)
 [![macOS](https://img.shields.io/badge/macOS-native-111827?logo=apple)](#macos)
 [![Linux](https://img.shields.io/badge/Linux-native-FCC624?logo=linux&logoColor=111)](#linux--proxmox-lxc)
 
@@ -18,6 +19,8 @@ iPhone + Moblin ── authenticated SRT over Tailscale ──> Tailnet IRL Serv
 
 No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest endpoint.
 
+**Documentation:** use the [GitHub Wiki](https://github.com/nikpottbecker/tailnet-irl-server/wiki) for complete installation, Moblin, OBS, security, operations and troubleshooting guides.
+
 ## Why use it?
 
 - **Private by design:** media listeners bind directly to the server's Tailscale IP instead of `0.0.0.0`.
@@ -33,7 +36,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 
 ### macOS
 
-Requirements: the official Tailscale app, an active Tailnet connection and macOS on Apple Silicon or Intel.
+Requirements: the official Tailscale app, an active Tailnet connection, Python 3 (included with the Apple Command Line Tools) and macOS on Apple Silicon or Intel.
 
 ```bash
 git clone https://github.com/nikpottbecker/tailnet-irl-server.git

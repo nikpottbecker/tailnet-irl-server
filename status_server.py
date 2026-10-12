@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import json
 import os
 import subprocess
@@ -16,6 +17,15 @@ from pathlib import Path
 
 CONFIG_DIR = Path(os.environ.get("IRL_CONFIG_DIR", "/etc/irl-server"))
 API_URL = os.environ.get("MEDIAMTX_API", "http://127.0.0.1:9997/v3/paths/list")
+TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+
+def is_tailscale_ipv4(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.version == 4 and address in TAILSCALE_IPV4_NETWORK
 
 
 def read_credentials(path: Path | None = None) -> dict[str, str]:
@@ -33,15 +43,14 @@ def read_credentials(path: Path | None = None) -> dict[str, str]:
 
 
 def tailscale_ip() -> str:
-    override = os.environ.get("TAILSCALE_IP")
-    if override:
-        return override
-    binary = os.environ.get("TAILSCALE_BIN", "tailscale")
-    result = subprocess.run(
-        [binary, "ip", "-4"], check=True, capture_output=True, text=True
-    )
-    value = result.stdout.splitlines()[0].strip()
-    if not value.startswith("100."):
+    value = os.environ.get("TAILSCALE_IP")
+    if not value:
+        binary = os.environ.get("TAILSCALE_BIN", "tailscale")
+        result = subprocess.run(
+            [binary, "ip", "-4"], check=True, capture_output=True, text=True
+        )
+        value = result.stdout.splitlines()[0].strip()
+    if not is_tailscale_ipv4(value):
         raise RuntimeError("no active Tailscale IPv4 address")
     return value
 
@@ -50,16 +59,22 @@ def stream_state() -> dict[str, object]:
     try:
         with urllib.request.urlopen(API_URL, timeout=1.5) as response:
             payload = json.load(response)
-    except (OSError, urllib.error.URLError, ValueError):
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise ValueError("unexpected MediaMTX API response")
+    except (OSError, urllib.error.URLError, TypeError, ValueError):
         return {"online": False, "ready": False, "readers": 0, "bytes": 0}
 
-    for item in payload.get("items", []):
+    for item in payload["items"]:
+        if not isinstance(item, dict):
+            continue
         if item.get("name") == "live":
+            readers = item.get("readers")
+            received = item.get("bytesReceived", 0)
             return {
                 "online": True,
                 "ready": bool(item.get("ready")),
-                "readers": len(item.get("readers") or []),
-                "bytes": int(item.get("bytesReceived", 0)),
+                "readers": len(readers) if isinstance(readers, list) else 0,
+                "bytes": int(received) if isinstance(received, (int, float)) else 0,
             }
     return {"online": True, "ready": False, "readers": 0, "bytes": 0}
 

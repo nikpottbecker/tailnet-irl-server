@@ -2,6 +2,18 @@
 
 All notable changes to Tailnet IRL Server are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Validate server addresses against Tailscale's complete `100.64.0.0/10` IPv4 range.
+- Fail early on macOS when the Python 3 runtime required by the dashboard is missing.
+- Handle malformed MediaMTX API responses without terminating dashboard requests.
+
+### Documentation
+
+- Add a complete GitHub Wiki for installation, client setup, security, operations and troubleshooting.
+
 ## 1.0.0 — 2026-10-11
 
 First public release.

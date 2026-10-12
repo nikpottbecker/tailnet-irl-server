@@ -13,13 +13,17 @@ AGENT_DIR="$HOME/Library/LaunchAgents"
 TAILSCALE_BIN=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 
 die() { echo "Fehler: $*" >&2; exit 1; }
+is_tailscale_ipv4() {
+  /usr/bin/python3 -c 'import ipaddress, sys; raise SystemExit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network("100.64.0.0/10"))' "$1" 2>/dev/null
+}
 [[ "$(uname -s)" == Darwin ]] || die "Dieser Installer ist nur für macOS."
 [[ -x "$TAILSCALE_BIN" ]] || die "Die Tailscale-App fehlt unter /Applications."
 command -v openssl >/dev/null 2>&1 || die "openssl fehlt."
 command -v curl >/dev/null 2>&1 || die "curl fehlt."
+[[ -x /usr/bin/python3 ]] || die "Python 3 fehlt. Installiere zuerst die Apple Command Line Tools mit: xcode-select --install"
 
 TAILSCALE_IP="$("$TAILSCALE_BIN" ip -4 2>/dev/null | head -n 1)"
-[[ "$TAILSCALE_IP" == 100.* ]] || die "Tailscale ist nicht verbunden."
+is_tailscale_ipv4 "$TAILSCALE_IP" || die "Tailscale ist nicht verbunden."
 
 case "$(uname -m)" in
   arm64) ARCH=arm64 ;;

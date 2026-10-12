@@ -6,10 +6,13 @@ DOMAIN="gui/$(id -u)"
 
 fail() { echo "NICHT OK: $*" >&2; exit 1; }
 pass() { echo "OK: $*"; }
+is_tailscale_ipv4() {
+  /usr/bin/python3 -c 'import ipaddress, sys; raise SystemExit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network("100.64.0.0/10"))' "$1" 2>/dev/null
+}
 
 [[ -x "$TAILSCALE_BIN" ]] || fail "Tailscale-App fehlt"
 IP="$("$TAILSCALE_BIN" ip -4 2>/dev/null | head -n 1)"
-[[ "$IP" == 100.* ]] || fail "Tailscale ist nicht verbunden"
+is_tailscale_ipv4 "$IP" || fail "Tailscale ist nicht verbunden"
 pass "Tailscale aktiv ($IP)"
 
 MEDIA_STATE="$(launchctl print "$DOMAIN/com.nik.irl-mediamtx" 2>/dev/null | awk '/state =/{print $3; exit}')"
