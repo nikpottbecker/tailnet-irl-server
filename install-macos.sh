@@ -78,10 +78,25 @@ render_plist "$SOURCE_DIR/launchd/com.nik.irl-mediamtx.plist.template" "$MEDIA_P
 render_plist "$SOURCE_DIR/launchd/com.nik.irl-dashboard.plist.template" "$DASHBOARD_PLIST"
 
 DOMAIN="gui/$(id -u)"
-launchctl bootout "$DOMAIN/com.nik.irl-dashboard" 2>/dev/null || true
-launchctl bootout "$DOMAIN/com.nik.irl-mediamtx" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$MEDIA_PLIST"
-launchctl bootstrap "$DOMAIN" "$DASHBOARD_PLIST"
+
+reload_agent() {
+  local label="$1" plist="$2"
+  launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+  for _ in {1..20}; do
+    launchctl print "$DOMAIN/$label" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  for _ in {1..5}; do
+    if launchctl bootstrap "$DOMAIN" "$plist" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  die "LaunchAgent konnte nicht geladen werden: $label"
+}
+
+reload_agent com.nik.irl-mediamtx "$MEDIA_PLIST"
+reload_agent com.nik.irl-dashboard "$DASHBOARD_PLIST"
 launchctl kickstart -k "$DOMAIN/com.nik.irl-mediamtx"
 launchctl kickstart -k "$DOMAIN/com.nik.irl-dashboard"
 
