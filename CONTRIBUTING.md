@@ -12,9 +12,10 @@ Bug reports, documentation fixes and focused pull requests are welcome.
    bash -n install.sh install-macos.sh uninstall.sh uninstall-macos.sh \
      selftest.sh selftest-macos.sh start-mediamtx.sh rotate-credentials.sh \
      recording.sh tests/e2e-local.sh tests/test-rotate-credentials.sh \
-     tests/test-recording-control.sh
+     tests/test-recording-control.sh tests/test-irl-serverctl.sh
    ./tests/test-rotate-credentials.sh
    ./tests/test-recording-control.sh
+   ./tests/test-irl-serverctl.sh
    ```
 
 5. Open a pull request with a concise explanation and verification notes.

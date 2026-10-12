@@ -13,6 +13,8 @@ fi
 VERSION_FILE="${IRL_VERSION_FILE:-$DEFAULT_VERSION_FILE}"
 RELEASE_API="${IRL_RELEASE_API:-https://api.github.com/repos/$REPOSITORY/releases/latest}"
 CURL_BIN="${IRL_CURL_BIN:-curl}"
+SYSTEMCTL_BIN="${IRL_SYSTEMCTL_BIN:-systemctl}"
+LAUNCHCTL_BIN="${IRL_LAUNCHCTL_BIN:-launchctl}"
 
 die() { echo "Fehler: $*" >&2; exit 1; }
 
@@ -21,6 +23,7 @@ usage() {
 Verwendung: irl-serverctl <Befehl>
 
   status                 Dienst- und Streamstatus anzeigen
+  doctor                 Produktionsbereitschaft vollständig prüfen
   version                Installierte Version anzeigen
   check-update           Nach einer neuen GitHub-Version suchen
   restart                MediaMTX und Dashboard neu starten
@@ -34,12 +37,14 @@ platform_paths() {
     Darwin)
       BASE_DIR="${IRL_BASE_DIR:-$HOME/Library/Application Support/IRL Server}"
       CONFIG_DIR="${IRL_CONFIG_DIR:-$BASE_DIR/config}"
+      STATE_DIR="${IRL_STATE_DIR:-$BASE_DIR/state}"
       RECORDING_SCRIPT="${IRL_RECORDING_SCRIPT:-$BASE_DIR/app/recording.sh}"
       TAILSCALE_BIN="${IRL_TAILSCALE_BIN:-/Applications/Tailscale.app/Contents/MacOS/Tailscale}"
       ;;
     Linux)
       BASE_DIR="${IRL_BASE_DIR:-/opt/irl-server}"
       CONFIG_DIR="${IRL_CONFIG_DIR:-/etc/irl-server}"
+      STATE_DIR="${IRL_STATE_DIR:-/var/lib/irl-server}"
       RECORDING_SCRIPT="${IRL_RECORDING_SCRIPT:-$BASE_DIR/recording.sh}"
       TAILSCALE_BIN="${IRL_TAILSCALE_BIN:-tailscale}"
       ;;
@@ -56,18 +61,179 @@ tailscale_ip() {
   "$TAILSCALE_BIN" ip -4 2>/dev/null | head -n 1
 }
 
+is_tailscale_ipv4() {
+  python3 -c 'import ipaddress, sys; raise SystemExit(ipaddress.ip_address(sys.argv[1]) not in ipaddress.ip_network("100.64.0.0/10"))' "$1" 2>/dev/null
+}
+
 service_state() {
   if [[ "$(uname -s)" == Darwin ]]; then
     local domain="gui/$(id -u)"
-    if launchctl print "$domain/com.nik.$1" >/dev/null 2>&1; then
+    if "$LAUNCHCTL_BIN" print "$domain/com.nik.$1" >/dev/null 2>&1; then
       echo aktiv
     else
       echo inaktiv
     fi
-  elif systemctl is-active --quiet "$1.service"; then
+  elif "$SYSTEMCTL_BIN" is-active --quiet "$1.service"; then
     echo aktiv
   else
     echo inaktiv
+  fi
+}
+
+doctor_ok() {
+  DOCTOR_OK=$((DOCTOR_OK + 1))
+  printf 'OK: %s\n' "$*"
+}
+
+doctor_warn() {
+  DOCTOR_WARN=$((DOCTOR_WARN + 1))
+  printf 'WARNUNG: %s\n' "$*"
+}
+
+doctor_fail() {
+  DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
+  printf 'FEHLER: %s\n' "$*" >&2
+}
+
+doctor() {
+  platform_paths
+  local ip credentials generated_config permissions publish_password read_password
+  local health health_result online storage_available storage_level
+  local media_state dashboard_state required_binding
+  DOCTOR_OK=0
+  DOCTOR_WARN=0
+  DOCTOR_FAIL=0
+  credentials="$CONFIG_DIR/credentials.env"
+  generated_config="$STATE_DIR/mediamtx.yml"
+
+  echo "Tailnet IRL Server – Produktionsprüfung"
+  echo
+
+  if [[ -x "$TAILSCALE_BIN" ]] || command -v "$TAILSCALE_BIN" >/dev/null 2>&1; then
+    ip="$(tailscale_ip)" || true
+    if [[ -n "$ip" ]] && is_tailscale_ipv4 "$ip"; then
+      doctor_ok "Tailscale verbunden ($ip)"
+    else
+      ip=""
+      doctor_fail "Tailscale ist nicht mit einer gültigen 100.64.0.0/10-Adresse verbunden."
+    fi
+  else
+    ip=""
+    doctor_fail "Tailscale-Befehl nicht gefunden: $TAILSCALE_BIN"
+  fi
+
+  if [[ -f "$VERSION_FILE" ]] && [[ "$(tr -d '[:space:]' < "$VERSION_FILE")" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    doctor_ok "Versionsdatei gültig ($(tr -d '[:space:]' < "$VERSION_FILE"))"
+  else
+    doctor_fail "Versionsdatei fehlt oder ist ungültig: $VERSION_FILE"
+  fi
+
+  if [[ -r "$credentials" ]]; then
+    publish_password="$(awk -F= '$1 == "PUBLISH_PASSWORD" {value=substr($0, index($0, "=") + 1)} END {print value}' "$credentials")"
+    read_password="$(awk -F= '$1 == "READ_PASSWORD" {value=substr($0, index($0, "=") + 1)} END {print value}' "$credentials")"
+    if [[ "$publish_password" =~ ^[A-Za-z0-9_-]{20,}$ && "$read_password" =~ ^[A-Za-z0-9_-]{20,}$ && "$publish_password" != "$read_password" ]]; then
+      doctor_ok "getrennte Publisher- und Reader-Zugangsdaten gültig"
+    else
+      doctor_fail "Zugangsdaten fehlen, sind zu kurz oder sind nicht getrennt."
+    fi
+    if [[ "$(uname -s)" == Darwin ]]; then
+      permissions="$(stat -f '%Lp' "$credentials")"
+    else
+      permissions="$(stat -c '%a' "$credentials")"
+    fi
+    if [[ "$permissions" == 600 || ( "$(uname -s)" == Linux && "$permissions" == 640 ) ]]; then
+      doctor_ok "Zugangsdaten geschützt (Dateirechte $permissions)"
+    else
+      doctor_fail "Unsichere Rechte $permissions an $credentials (erwartet: 600, unter Linux auch 640)."
+    fi
+  else
+    doctor_fail "Zugangsdaten nicht lesbar: $credentials"
+  fi
+
+  media_state="$(service_state irl-mediamtx)"
+  dashboard_state="$(service_state irl-dashboard)"
+  if [[ "$media_state" == aktiv ]]; then
+    doctor_ok "MediaMTX-Dienst aktiv"
+  else
+    doctor_fail "MediaMTX-Dienst inaktiv"
+  fi
+  if [[ "$dashboard_state" == aktiv ]]; then
+    doctor_ok "Dashboard-Dienst aktiv"
+  else
+    doctor_fail "Dashboard-Dienst inaktiv"
+  fi
+
+  if [[ -n "$ip" && -r "$generated_config" ]]; then
+    local bindings_ok=1
+    for required_binding in \
+      "rtspAddress: $ip:8554" \
+      "rtmpAddress: $ip:1935" \
+      "hlsAddress: $ip:8888" \
+      "webrtcAddress: $ip:8889" \
+      "webrtcLocalUDPAddress: $ip:8189" \
+      "srtAddress: $ip:8890"; do
+      grep -Fqx "$required_binding" "$generated_config" || bindings_ok=0
+    done
+    if grep -Eq '^[a-zA-Z]+Address: (0\.0\.0\.0|\*):' "$generated_config"; then
+      bindings_ok=0
+    fi
+    if [[ "$bindings_ok" -eq 1 ]]; then
+      doctor_ok "Medienports ausschließlich an die aktuelle Tailscale-IP gebunden"
+    else
+      doctor_fail "Generierte MediaMTX-Konfiguration passt nicht vollständig zur aktuellen Tailscale-IP."
+    fi
+  elif [[ -n "$ip" ]]; then
+    doctor_fail "Generierte MediaMTX-Konfiguration nicht lesbar: $generated_config"
+  fi
+
+  if [[ -n "$ip" ]]; then
+    health="$($CURL_BIN -fsS --max-time 3 "http://$ip:8090/healthz" 2>/dev/null)" || health=""
+    if [[ -n "$health" ]]; then
+      health_result="$(HEALTH_JSON="$health" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+data = json.loads(os.environ["HEALTH_JSON"])
+storage = data.get("storage") if isinstance(data.get("storage"), dict) else {}
+print("true" if data.get("online") is True else "false")
+print("true" if storage.get("available") is True else "false")
+print(storage.get("level", "unavailable"))
+PY
+)"
+      online="$(sed -n '1p' <<< "$health_result")"
+      storage_available="$(sed -n '2p' <<< "$health_result")"
+      storage_level="$(sed -n '3p' <<< "$health_result")"
+      if [[ "$online" == true ]]; then
+        doctor_ok "Dashboard und lokale MediaMTX-API erreichbar"
+      else
+        doctor_fail "Dashboard antwortet, meldet MediaMTX aber nicht als online."
+      fi
+      if [[ "$storage_available" != true ]]; then
+        doctor_fail "Speicherstatus nicht verfügbar."
+      elif [[ "$storage_level" == critical ]]; then
+        doctor_fail "Speicherplatz kritisch – vor dem Einsatz Platz freigeben."
+      elif [[ "$storage_level" == warning ]]; then
+        doctor_warn "Speicherplatz knapp – verfügbare Kapazität vor dem Einsatz prüfen."
+      elif [[ "$storage_level" == ok ]]; then
+        doctor_ok "Speicherplatz ausreichend"
+      else
+        doctor_fail "Unbekannter Speicherstatus: ${storage_level:-leer}"
+      fi
+    else
+      doctor_fail "Dashboard-Healthcheck unter http://$ip:8090/healthz nicht erreichbar."
+    fi
+  fi
+
+  echo
+  printf 'Ergebnis: %d OK · %d Warnungen · %d Fehler\n' "$DOCTOR_OK" "$DOCTOR_WARN" "$DOCTOR_FAIL"
+  if [[ "$DOCTOR_FAIL" -gt 0 ]]; then
+    echo "NICHT BEREIT"
+    return 1
+  fi
+  if [[ "$DOCTOR_WARN" -gt 0 ]]; then
+    echo "BEREIT MIT WARNUNG"
+  else
+    echo "BEREIT"
   fi
 }
 
@@ -140,17 +306,18 @@ restart_services() {
   platform_paths
   if [[ "$(uname -s)" == Darwin ]]; then
     local domain="gui/$(id -u)"
-    launchctl kickstart -k "$domain/com.nik.irl-mediamtx"
-    launchctl kickstart -k "$domain/com.nik.irl-dashboard"
+    "$LAUNCHCTL_BIN" kickstart -k "$domain/com.nik.irl-mediamtx"
+    "$LAUNCHCTL_BIN" kickstart -k "$domain/com.nik.irl-dashboard"
   else
     [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "Bitte mit sudo ausführen."
-    systemctl restart irl-mediamtx.service irl-dashboard.service
+    "$SYSTEMCTL_BIN" restart irl-mediamtx.service irl-dashboard.service
   fi
   echo "Dienste neu gestartet."
 }
 
 case "${1:-help}" in
   status) show_status ;;
+  doctor) doctor ;;
   version) echo "Tailnet IRL Server $(installed_version)" ;;
   check-update) check_update ;;
   restart) restart_services ;;

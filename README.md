@@ -36,6 +36,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 - **Reproducible install:** the MediaMTX download is checked against its official SHA-256 manifest.
 - **Self-test included:** verify Tailnet binding, services and the MediaMTX API at any time.
 - **One control command:** inspect services, recordings and available releases with `irl-serverctl`.
+- **Production preflight:** run `irl-serverctl doctor` to verify the Tailnet address, protected credentials, native services, private listener bindings, dashboard health and recording capacity before going live.
 - **Continuously verified:** macOS/Linux unit checks and an authenticated H.264/AAC SRT end-to-end test run on GitHub Actions.
 
 ## Quick start
@@ -133,6 +134,18 @@ irl-serverctl status
 ```
 
 Use `irl-serverctl check-update` to compare the installed version with the latest GitHub release. It only checks and reports; it never installs an update automatically. `irl-serverctl restart` restarts both services, and `irl-serverctl recording status` delegates to the recording control safely.
+
+Before a production, run the non-destructive readiness check. It exits with a non-zero status when a required check fails, so it can also be used by local monitoring:
+
+```bash
+# macOS
+"$HOME/Library/Application Support/IRL Server/app/irl-serverctl" doctor
+
+# Linux
+sudo irl-serverctl doctor
+```
+
+Low disk space produces a visible warning; critically low disk space, a public or stale listener binding, insecure credentials, stopped services or an unreachable health endpoint make the result `NICHT BEREIT`.
 
 The dashboard keeps up to 200 connection events for 30 days in `connection-history.json` below the platform state directory. Only timestamps, event types and completed stream durations are stored; credentials, connection URLs and media content are never written to this history. The state survives service restarts and is retained during uninstall like the existing configuration and recordings.
 

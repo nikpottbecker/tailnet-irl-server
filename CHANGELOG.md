@@ -4,6 +4,17 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+## 1.7.0 — 2026-10-12
+
+### Added
+
+- Add `irl-serverctl doctor` as a non-destructive production preflight for Tailscale connectivity, version and credential integrity, native services, private MediaMTX bindings, dashboard health and storage capacity.
+- Return a failing exit status when a required readiness check fails, making the command suitable for local monitoring and deployment gates.
+
+### Security
+
+- Detect stale, incomplete or publicly bound generated MediaMTX listener configurations before a production starts.
+
 ## 1.6.0 — 2026-10-12
 
 ### Added
