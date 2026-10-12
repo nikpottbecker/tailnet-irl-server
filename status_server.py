@@ -25,6 +25,7 @@ CONFIG_DIR = Path(os.environ.get("IRL_CONFIG_DIR", "/etc/irl-server"))
 STATE_DIR = Path(os.environ.get("IRL_STATE_DIR", "/var/lib/irl-server"))
 API_URL = os.environ.get("MEDIAMTX_API", "http://127.0.0.1:9997/v3/paths/list")
 TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+LOCK_TYPE = type(threading.Lock())
 DEFAULT_PROFILE: dict[str, object] = {
     "stream_name": "IRL Server (Tailscale)",
     "video_resolution": "1920x1080",
@@ -323,6 +324,101 @@ class StorageMonitor:
         }
 
 
+class StreamHealthMonitor:
+    """Calculate shared input throughput and detect a ready-but-stalled feed."""
+
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.monotonic,
+        stall_seconds: float = 8.0,
+    ) -> None:
+        self.clock = clock
+        self.stall_seconds = stall_seconds
+        self.lock = threading.Lock()
+        self.session: str | None = None
+        self.last_bytes: int | None = None
+        self.last_sample_at: float | None = None
+        self.last_progress_at: float | None = None
+        self.last_bitrate_bps = 0
+        self.has_progress = False
+
+    def _reset(self) -> None:
+        self.session = None
+        self.last_bytes = None
+        self.last_sample_at = None
+        self.last_progress_at = None
+        self.last_bitrate_bps = 0
+        self.has_progress = False
+
+    def snapshot(self, stream: dict[str, object]) -> dict[str, object]:
+        now = self.clock()
+        with self.lock:
+            if not bool(stream.get("online")):
+                self._reset()
+                return {
+                    "state": "offline",
+                    "bitrate_bps": 0,
+                    "stalled_seconds": 0,
+                }
+            if not bool(stream.get("ready")):
+                self._reset()
+                return {
+                    "state": "idle",
+                    "bitrate_bps": 0,
+                    "stalled_seconds": 0,
+                }
+
+            raw_bytes = stream.get("bytes", 0)
+            received = (
+                max(0, int(raw_bytes))
+                if isinstance(raw_bytes, (int, float)) and not isinstance(raw_bytes, bool)
+                else 0
+            )
+            ready_since = stream.get("ready_since")
+            session = ready_since if isinstance(ready_since, str) else "active"
+            if (
+                self.last_bytes is None
+                or self.last_sample_at is None
+                or self.last_progress_at is None
+                or session != self.session
+                or received < self.last_bytes
+            ):
+                self.session = session
+                self.last_bytes = received
+                self.last_sample_at = now
+                self.last_progress_at = now
+                self.last_bitrate_bps = 0
+                self.has_progress = False
+                return {
+                    "state": "starting",
+                    "bitrate_bps": 0,
+                    "stalled_seconds": 0,
+                }
+
+            elapsed = max(0.0, now - self.last_sample_at)
+            delta = received - self.last_bytes
+            bitrate = int(delta * 8 / elapsed) if elapsed > 0 and delta > 0 else 0
+            if delta > 0:
+                self.last_progress_at = now
+                self.last_bitrate_bps = max(0, bitrate)
+                self.has_progress = True
+            stalled_for = max(0.0, now - self.last_progress_at)
+            state = (
+                "stalled"
+                if stalled_for >= self.stall_seconds
+                else "receiving"
+                if self.has_progress
+                else "starting"
+            )
+            self.last_bytes = received
+            self.last_sample_at = now
+            return {
+                "state": state,
+                "bitrate_bps": 0 if state == "stalled" else self.last_bitrate_bps,
+                "stalled_seconds": int(stalled_for) if state == "stalled" else 0,
+            }
+
+
 def app_version(path: Path | None = None) -> str:
     version_path = path or Path(__file__).with_name("VERSION")
     try:
@@ -490,6 +586,9 @@ def stream_state() -> dict[str, object]:
 
 def tracked_stream_state(server: ThreadingHTTPServer) -> dict[str, object]:
     state = dict(stream_state())
+    health_monitor = getattr(server, "stream_health_monitor", None)
+    if isinstance(health_monitor, StreamHealthMonitor):
+        state["stream_health"] = health_monitor.snapshot(state)
     tracker = getattr(server, "event_tracker", None)
     if isinstance(tracker, EventTracker):
         state["history"] = tracker.observe(state)
@@ -497,6 +596,32 @@ def tracked_stream_state(server: ThreadingHTTPServer) -> dict[str, object]:
     if isinstance(storage_monitor, StorageMonitor):
         state["storage"] = storage_monitor.snapshot()
     return state
+
+
+def current_stream_state(server: ThreadingHTTPServer) -> dict[str, object]:
+    cache_lock = getattr(server, "status_cache_lock", None)
+    if isinstance(cache_lock, LOCK_TYPE):
+        with cache_lock:
+            cached = getattr(server, "status_cache", None)
+            if isinstance(cached, dict):
+                return dict(cached)
+    return tracked_stream_state(server)
+
+
+def run_status_monitor(
+    server: ThreadingHTTPServer,
+    stop_event: threading.Event,
+    interval_seconds: float = 2.0,
+) -> None:
+    """Keep stream health and event history current without a browser being open."""
+
+    while not stop_event.is_set():
+        state = tracked_stream_state(server)
+        cache_lock = getattr(server, "status_cache_lock", None)
+        if isinstance(cache_lock, LOCK_TYPE):
+            with cache_lock:
+                server.status_cache = state  # type: ignore[attr-defined]
+        stop_event.wait(interval_seconds)
 
 
 def connection_data(
@@ -548,6 +673,13 @@ def connection_data(
 def status_presentation(state: dict[str, object]) -> tuple[str, str]:
     if not state["online"]:
         return "SERVER NICHT ERREICHBAR", "error"
+    stream_health = state.get("stream_health")
+    if (
+        state["ready"]
+        and isinstance(stream_health, dict)
+        and stream_health.get("state") == "stalled"
+    ):
+        return "STREAM HÄNGT", "error"
     if state["ready"]:
         return "LIVE", "live"
     return "WARTET AUF HANDY", "idle"
@@ -587,7 +719,7 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <section><h2>2 · OBS auf dem PC</h2><p>Medienquelle → Lokale Datei aus → Eingabeformat <b>mpegts</b>.</p><code id="obs">{esc(links['srt_read'])}</code><button data-copy-target="obs">OBS-Link kopieren</button></section>
 <section><h2>Fallback für Moblin</h2><p>Falls SRT in einem Netz blockiert ist, RTMP testen.</p><code id="rtmp">{esc(links['rtmp_publish'])}</code><button data-copy-target="rtmp">RTMP-Link kopieren</button></section>
 <section><h2>Vorschau</h2><p>LL-HLS oder WebRTC; mit Benutzer <b>studio</b> und dem Lesepasswort anmelden.</p><a class="button" href="{esc(links['preview'])}">LL-HLS öffnen</a> <a class="button" href="{esc(links['webrtc_preview'])}">WebRTC öffnen</a></section>
-<section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Recording: <b>{'aktiv' if recording_config['enabled'] else 'aus'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
+<section><h2>Live-Telemetrie</h2><p>Media-Server: <b id="server-state">{'bereit' if state['online'] else 'nicht erreichbar'}</b><br>Feed: <b id="feed-state">{'aktiv' if state['ready'] else 'offline'}</b><br>Signalqualität: <b id="stream-health">wird geprüft</b><br>Recording: <b>{'aktiv' if recording_config['enabled'] else 'aus'}</b><br>Datenrate: <b id="bitrate">0.00 Mbit/s</b><br>Laufzeit: <b id="uptime">–</b><br>Leser: <b id="reader-count">{esc(state['readers'])}</b><br>Empfangen: <b id="received-bytes">{float(state['bytes']) / 1_000_000:.1f} MB</b><br>Gesendet: <b id="sent-bytes">{float(state.get('bytes_sent', 0)) / 1_000_000:.1f} MB</b><br>Spuren: <b id="tracks">{esc(', '.join(state.get('tracks', [])) or '–')}</b></p></section>
 <section><h2>Verbindungsverlauf</h2><p>Stream-Enden in 24 h: <b id="disconnect-count">0</b><br>Zuletzt live: <b id="last-live">–</b></p><ol id="event-history"><li><small>Noch keine Ereignisse</small></li></ol></section>
 <section><h2>Speicher</h2><p>Status: <b id="storage-state">wird geladen</b><br>Frei: <b id="storage-free">–</b><br>Belegt: <b id="storage-used">–</b><br>Aufnahmen: <b id="recording-storage">–</b></p><small>Es werden nur Summen übertragen, keine Dateinamen oder Pfade.</small></section>
 <section><h2>Alternative für VLC</h2><p>RTSP ist für VLC/FFmpeg meist die einfachste Leseverbindung.</p><code id="rtsp">{esc(links['rtsp_read'])}</code><button data-copy-target="rtsp">RTSP-Link kopieren</button></section>
@@ -595,8 +727,6 @@ footer{{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:
 <footer>Tailnet IRL Server v{esc(app_version())} · This product includes Tailnet IRL Server software developed by <a href="https://github.com/nikpottbecker">Nik Pottbecker</a>. <a href="https://github.com/nikpottbecker/tailnet-irl-server">Source &amp; license</a></footer>
 <script>
 const badge = document.querySelector('#status-badge');
-let previousBytes = null;
-let previousSampleAt = null;
 function formatDuration(value) {{
   const started = Date.parse(value || '');
   if (!Number.isFinite(started)) return '–';
@@ -677,17 +807,19 @@ function showStatus(state) {{
   const online = Boolean(state.online);
   const ready = Boolean(state.ready);
   const bytes = Number(state.bytes || 0);
-  const sampleAt = performance.now();
-  let bitrate = 0;
-  if (ready && previousBytes !== null && bytes >= previousBytes && previousSampleAt !== null) {{
-    const seconds = (sampleAt - previousSampleAt) / 1000;
-    if (seconds > 0) bitrate = ((bytes - previousBytes) * 8) / seconds / 1000000;
-  }}
-  badge.textContent = !online ? 'SERVER NICHT ERREICHBAR' : ready ? 'LIVE' : 'WARTET AUF HANDY';
-  badge.className = `badge ${{!online ? 'error' : ready ? 'live' : 'idle'}}`;
+  const health = state.stream_health && typeof state.stream_health === 'object'
+    ? state.stream_health
+    : {{state: !online ? 'offline' : ready ? 'starting' : 'idle', bitrate_bps: 0, stalled_seconds: 0}};
+  const stalled = ready && health.state === 'stalled';
+  const healthLabels = {{offline: 'SERVER OFFLINE', idle: 'KEIN FEED', starting: 'STARTET', receiving: 'EMPFÄNGT DATEN', stalled: 'KEINE DATEN'}};
+  badge.textContent = !online ? 'SERVER NICHT ERREICHBAR' : stalled ? 'STREAM HÄNGT' : ready ? 'LIVE' : 'WARTET AUF HANDY';
+  badge.className = `badge ${{!online || stalled ? 'error' : ready ? 'live' : 'idle'}}`;
   document.querySelector('#server-state').textContent = online ? 'bereit' : 'nicht erreichbar';
-  document.querySelector('#feed-state').textContent = ready ? 'aktiv' : 'offline';
-  document.querySelector('#bitrate').textContent = `${{bitrate.toFixed(2)}} Mbit/s`;
+  document.querySelector('#feed-state').textContent = stalled ? 'hängt' : ready ? 'aktiv' : 'offline';
+  const healthElement = document.querySelector('#stream-health');
+  healthElement.textContent = healthLabels[health.state] || 'UNBEKANNT';
+  healthElement.className = stalled ? 'storage-critical' : '';
+  document.querySelector('#bitrate').textContent = `${{(Number(health.bitrate_bps || 0) / 1000000).toFixed(2)}} Mbit/s`;
   document.querySelector('#uptime').textContent = ready ? formatDuration(state.ready_since) : '–';
   document.querySelector('#reader-count').textContent = Number(state.readers || 0).toLocaleString('de-DE');
   document.querySelector('#received-bytes').textContent = `${{(bytes / 1000000).toFixed(1)}} MB`;
@@ -696,8 +828,6 @@ function showStatus(state) {{
   document.querySelector('#tracks').textContent = tracks.length ? tracks.join(', ') : '–';
   showHistory(state.history);
   showStorage(state.storage);
-  previousBytes = ready ? bytes : null;
-  previousSampleAt = ready ? sampleAt : null;
 }}
 async function refreshStatus() {{
   try {{
@@ -748,7 +878,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urllib.parse.urlsplit(self.path).path
         if path in {"/healthz", "/api/status"}:
-            state = tracked_stream_state(self.server)
+            state = current_stream_state(self.server)
             body = json.dumps(state).encode()
             status = 200 if path == "/api/status" or state["online"] else 503
             self.send_response(status)
@@ -792,7 +922,7 @@ class Handler(BaseHTTPRequestHandler):
             body = render_page(
                 self.server.server_address[0],
                 self.server.credentials,  # type: ignore[attr-defined]
-                tracked_stream_state(self.server),
+                current_stream_state(self.server),
                 self.server.profile,  # type: ignore[attr-defined]
                 self.server.recording,  # type: ignore[attr-defined]
             ).encode()
@@ -826,14 +956,27 @@ def main() -> None:
     server.credentials = read_credentials()  # type: ignore[attr-defined]
     server.profile = read_profile()  # type: ignore[attr-defined]
     server.recording = read_recording()  # type: ignore[attr-defined]
+    server.stream_health_monitor = StreamHealthMonitor()  # type: ignore[attr-defined]
     server.event_tracker = EventTracker(STATE_DIR / "connection-history.json")  # type: ignore[attr-defined]
     server.storage_monitor = StorageMonitor(STATE_DIR)  # type: ignore[attr-defined]
+    server.status_cache_lock = threading.Lock()  # type: ignore[attr-defined]
+    server.status_cache = None  # type: ignore[attr-defined]
+    monitor_stop = threading.Event()
+    monitor_thread = threading.Thread(
+        target=run_status_monitor,
+        args=(server, monitor_stop),
+        name="irl-status-monitor",
+        daemon=True,
+    )
+    monitor_thread.start()
     print(f"IRL dashboard listening on http://{ip}:{server.server_port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        monitor_stop.set()
+        monitor_thread.join(timeout=3)
         server.server_close()
 
 

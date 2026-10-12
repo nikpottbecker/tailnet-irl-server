@@ -31,6 +31,7 @@ No Docker. No router port forwarding. No Cloudflare Tunnel. No public ingest end
 - **Multiple outputs:** SRT, RTSP, RTMP, LL-HLS and WebRTC through MediaMTX.
 - **Installable dashboard:** PWA identity, direct LL-HLS/WebRTC previews and a machine-readable version endpoint.
 - **Connection history:** retain 30 days of stream/server transitions and recent live durations locally without storing credentials or media URLs.
+- **Stall detection:** calculate input bitrate on the server and flag a ready path that stops receiving media for eight seconds.
 - **Storage guard:** show free disk space, usage level and aggregate recording size before a production runs out of space.
 - **Automatic credentials:** publisher and viewer secrets are generated locally and kept out of logs.
 - **Reproducible install:** the MediaMTX download is checked against its official SHA-256 manifest.
@@ -145,7 +146,7 @@ Before a production, run the non-destructive readiness check. It exits with a no
 sudo irl-serverctl doctor
 ```
 
-Low disk space produces a visible warning; critically low disk space, a public or stale listener binding, insecure credentials, stopped services or an unreachable health endpoint make the result `NICHT BEREIT`.
+Low disk space produces a visible warning; critically low disk space, a public or stale listener binding, insecure credentials, stopped services, an unreachable health endpoint or an active-but-stalled feed make the result `NICHT BEREIT`.
 
 The dashboard keeps up to 200 connection events for 30 days in `connection-history.json` below the platform state directory. Only timestamps, event types and completed stream durations are stored; credentials, connection URLs and media content are never written to this history. The state survives service restarts and is retained during uninstall like the existing configuration and recordings.
 

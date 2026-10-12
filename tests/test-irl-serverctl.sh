@@ -52,7 +52,8 @@ echo 100.64.1.2
 EOF
 cat > "$TEMP_DIR/bin/curl" <<'EOF'
 #!/usr/bin/env bash
-printf '{"online":true,"ready":false,"storage":{"available":true,"level":"%s"}}\n' "${DOCTOR_STORAGE_LEVEL:-ok}"
+printf '{"online":true,"ready":%s,"stream_health":{"state":"%s","bitrate_bps":0,"stalled_seconds":0},"storage":{"available":true,"level":"%s"}}\n' \
+  "${DOCTOR_STREAM_READY:-false}" "${DOCTOR_STREAM_HEALTH:-idle}" "${DOCTOR_STORAGE_LEVEL:-ok}"
 EOF
 cat > "$TEMP_DIR/bin/services" <<'EOF'
 #!/usr/bin/env bash
@@ -86,6 +87,13 @@ if env "${DOCTOR_ENV[@]}" DOCTOR_STORAGE_LEVEL=critical "$SOURCE_DIR/irl-serverc
 fi
 grep -Fq 'Speicherplatz kritisch' "$TEMP_DIR/doctor-critical.out"
 grep -Fxq 'NICHT BEREIT' "$TEMP_DIR/doctor-critical.out"
+
+if env "${DOCTOR_ENV[@]}" DOCTOR_STREAM_READY=true DOCTOR_STREAM_HEALTH=stalled "$SOURCE_DIR/irl-serverctl" doctor > "$TEMP_DIR/doctor-stalled.out" 2>&1; then
+  echo "Doctor akzeptierte einen festgefahrenen Stream unerwartet." >&2
+  exit 1
+fi
+grep -Fq 'keine Mediendaten' "$TEMP_DIR/doctor-stalled.out"
+grep -Fxq 'NICHT BEREIT' "$TEMP_DIR/doctor-stalled.out"
 
 sed -i.bak 's/srtAddress: 100.64.1.2:8890/srtAddress: 0.0.0.0:8890/' "$TEMP_DIR/state/mediamtx.yml"
 rm -f "$TEMP_DIR/state/mediamtx.yml.bak"

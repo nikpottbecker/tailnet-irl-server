@@ -98,7 +98,7 @@ doctor_fail() {
 doctor() {
   platform_paths
   local ip credentials generated_config permissions publish_password read_password
-  local health health_result online storage_available storage_level
+  local health health_result online storage_available storage_level stream_ready stream_health
   local media_state dashboard_state required_binding
   DOCTOR_OK=0
   DOCTOR_WARN=0
@@ -198,11 +198,16 @@ storage = data.get("storage") if isinstance(data.get("storage"), dict) else {}
 print("true" if data.get("online") is True else "false")
 print("true" if storage.get("available") is True else "false")
 print(storage.get("level", "unavailable"))
+print("true" if data.get("ready") is True else "false")
+stream_health = data.get("stream_health") if isinstance(data.get("stream_health"), dict) else {}
+print(stream_health.get("state", "unknown"))
 PY
 )"
       online="$(sed -n '1p' <<< "$health_result")"
       storage_available="$(sed -n '2p' <<< "$health_result")"
       storage_level="$(sed -n '3p' <<< "$health_result")"
+      stream_ready="$(sed -n '4p' <<< "$health_result")"
+      stream_health="$(sed -n '5p' <<< "$health_result")"
       if [[ "$online" == true ]]; then
         doctor_ok "Dashboard und lokale MediaMTX-API erreichbar"
       else
@@ -218,6 +223,9 @@ PY
         doctor_ok "Speicherplatz ausreichend"
       else
         doctor_fail "Unbekannter Speicherstatus: ${storage_level:-leer}"
+      fi
+      if [[ "$stream_ready" == true && "$stream_health" == stalled ]]; then
+        doctor_fail "MediaMTX meldet einen aktiven Feed, aber es kommen seit mindestens acht Sekunden keine Mediendaten an."
       fi
     else
       doctor_fail "Dashboard-Healthcheck unter http://$ip:8090/healthz nicht erreichbar."
@@ -253,11 +261,22 @@ ip, version, media_service, dashboard_service = sys.argv[1:]
 stream = "live" if data.get("ready") else "wartet auf Stream"
 history = data.get("history") if isinstance(data.get("history"), dict) else {}
 storage = data.get("storage") if isinstance(data.get("storage"), dict) else {}
+stream_health = data.get("stream_health") if isinstance(data.get("stream_health"), dict) else {}
+health_labels = {
+    "offline": "Server offline",
+    "idle": "kein Feed",
+    "starting": "startet",
+    "receiving": "empfängt Daten",
+    "stalled": "keine Daten / hängt",
+}
+health_state = str(stream_health.get("state", "unknown"))
+bitrate_mbps = float(stream_health.get("bitrate_bps", 0)) / 1_000_000
 print(f"Version: {version}")
 print(f"Tailscale: {ip}")
 print(f"MediaMTX: {media_service}")
 print(f"Dashboard: {dashboard_service}")
 print(f"Stream: {stream}")
+print(f"Signal: {health_labels.get(health_state, 'unbekannt')} · {bitrate_mbps:.2f} Mbit/s")
 print(f"Zuschauer: {data.get('readers', 0)}")
 print(f"Stream-Enden (24 h): {history.get('disconnects_24h', 0)}")
 print(f"Zuletzt live: {history.get('last_live_at') or '–'}")

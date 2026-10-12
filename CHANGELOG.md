@@ -4,6 +4,19 @@ All notable changes to Tailnet IRL Server are documented here.
 
 ## Unreleased
 
+## 1.8.0 — 2026-10-12
+
+### Added
+
+- Calculate input bitrate server-side so the dashboard, status API and management CLI share one authoritative measurement.
+- Detect a MediaMTX path that remains ready without receiving additional media bytes for eight seconds.
+- Show `starting`, `receiving` and `stalled` signal states in the dashboard and `/api/status` response.
+- Make `irl-serverctl doctor` reject an active but stalled feed and recover automatically when media bytes resume.
+
+### Changed
+
+- Replace browser-local bitrate sampling with the shared server-side stream-health monitor.
+
 ## 1.7.0 — 2026-10-12
 
 ### Added

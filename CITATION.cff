@@ -8,6 +8,6 @@ authors:
     alias: "nikpottbecker"
 repository-code: "https://github.com/nikpottbecker/tailnet-irl-server"
 url: "https://github.com/nikpottbecker/tailnet-irl-server"
-version: "1.7.0"
+version: "1.8.0"
 date-released: "2026-10-12"
 license: "BSD-Advertising-Acknowledgement"

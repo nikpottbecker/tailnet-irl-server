@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 import urllib.parse
 from collections import namedtuple
@@ -12,6 +13,83 @@ import status_server
 
 
 class StatusServerTests(unittest.TestCase):
+    def test_stream_health_monitor_detects_stall_and_recovery(self):
+        clock = [100.0]
+        monitor = status_server.StreamHealthMonitor(
+            clock=lambda: clock[0], stall_seconds=6
+        )
+        offline = status_server.offline_state()
+        self.assertEqual(monitor.snapshot(offline)["state"], "offline")
+
+        idle = dict(offline, online=True)
+        self.assertEqual(monitor.snapshot(idle)["state"], "idle")
+
+        live = dict(
+            idle,
+            ready=True,
+            bytes=100,
+            ready_since="2026-10-12T12:00:00Z",
+        )
+        self.assertEqual(monitor.snapshot(live)["state"], "starting")
+
+        clock[0] += 2
+        live["bytes"] = 1_000_100
+        receiving = monitor.snapshot(live)
+        self.assertEqual(receiving["state"], "receiving")
+        self.assertEqual(receiving["bitrate_bps"], 4_000_000)
+
+        clock[0] += 5
+        self.assertEqual(monitor.snapshot(live)["state"], "receiving")
+        clock[0] += 2
+        stalled = monitor.snapshot(live)
+        self.assertEqual(stalled["state"], "stalled")
+        self.assertEqual(stalled["stalled_seconds"], 7)
+
+        clock[0] += 1
+        live["bytes"] += 250_000
+        recovered = monitor.snapshot(live)
+        self.assertEqual(recovered["state"], "receiving")
+        self.assertEqual(recovered["bitrate_bps"], 2_000_000)
+        self.assertEqual(recovered["stalled_seconds"], 0)
+
+        live["ready_since"] = "2026-10-12T12:05:00Z"
+        self.assertEqual(monitor.snapshot(live)["state"], "starting")
+
+    def test_background_status_monitor_samples_until_stopped(self):
+        stop_event = threading.Event()
+        calls = []
+
+        def sample(server):
+            calls.append(server)
+            if len(calls) == 3:
+                stop_event.set()
+            return {}
+
+        class TestServer:
+            pass
+
+        server = TestServer()
+        server.status_cache_lock = threading.Lock()
+        server.status_cache = None
+        with patch("status_server.tracked_stream_state", side_effect=sample):
+            status_server.run_status_monitor(server, stop_event, interval_seconds=0)
+        self.assertEqual(calls, [server, server, server])
+        self.assertEqual(server.status_cache, {})
+
+    def test_current_stream_state_uses_background_cache(self):
+        class TestServer:
+            pass
+
+        server = TestServer()
+        server.status_cache_lock = threading.Lock()
+        server.status_cache = {"online": True, "ready": False}
+        with patch("status_server.tracked_stream_state") as live_sample:
+            self.assertEqual(
+                status_server.current_stream_state(server),
+                {"online": True, "ready": False},
+            )
+        live_sample.assert_not_called()
+
     def test_storage_monitor_aggregates_recordings_and_caches_results(self):
         disk_usage = namedtuple("usage", "total used free")
         clock = [100.0]
@@ -209,6 +287,30 @@ class StatusServerTests(unittest.TestCase):
         self.assertIn("document.execCommand('copy')", page)
         self.assertIn("developed by <a href=\"https://github.com/nikpottbecker\">Nik Pottbecker</a>", page)
 
+    def test_dashboard_renders_stalled_stream_as_error(self):
+        credentials = {
+            "PUBLISH_PASSWORD": "publishersecret1234567890",
+            "READ_PASSWORD": "readersecret123456789012",
+        }
+        state = {
+            "online": True,
+            "ready": True,
+            "readers": 0,
+            "bytes": 1_000_000,
+            "bytes_sent": 0,
+            "ready_since": "2026-10-12T12:00:00Z",
+            "tracks": ["H264", "MPEG-4 Audio"],
+            "stream_health": {
+                "state": "stalled",
+                "bitrate_bps": 0,
+                "stalled_seconds": 8,
+            },
+        }
+        page = status_server.render_page("100.64.1.2", credentials, state)
+        self.assertIn("STREAM HÄNGT", page)
+        self.assertIn("Signalqualität", page)
+        self.assertIn("health.state === 'stalled'", page)
+
     def test_status_presentation(self):
         self.assertEqual(
             status_server.status_presentation({"online": False, "ready": False}),
@@ -221,6 +323,16 @@ class StatusServerTests(unittest.TestCase):
         self.assertEqual(
             status_server.status_presentation({"online": True, "ready": True}),
             ("LIVE", "live"),
+        )
+        self.assertEqual(
+            status_server.status_presentation(
+                {
+                    "online": True,
+                    "ready": True,
+                    "stream_health": {"state": "stalled"},
+                }
+            ),
+            ("STREAM HÄNGT", "error"),
         )
 
     def test_stream_state_rejects_invalid_api_shape(self):
